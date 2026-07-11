@@ -67,10 +67,25 @@ class ApiService {
       url = uri.replace(queryParameters: newQueryParams).toString();
     }
 
-    return await http.get(
-      Uri.parse(url),
-      headers: _headers(),
-    ).timeout(const Duration(seconds: 10));
+    print("=== ApiService GET Request ===");
+    print("URL: $url");
+    print("Headers: ${_headers()}");
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: _headers(),
+      ).timeout(const Duration(seconds: 10));
+
+      print("=== ApiService GET Response ===");
+      print("Status Code: ${response.statusCode}");
+      print("Body: ${response.body}");
+      return response;
+    } catch (e) {
+      print("=== ApiService GET Error ===");
+      print("Error: $e");
+      rethrow;
+    }
   }
 
   static Future<http.Response> post(
@@ -85,10 +100,26 @@ class ApiService {
       body['id_empresa'] = selectedEmpresaId;
     }
 
-    return await http.post(
-      Uri.parse(url),
-      headers: _headers(),
-      body: jsonEncode(body),
-    ).timeout(const Duration(seconds: 10));
+    print("=== ApiService POST Request ===");
+    print("URL: $url");
+    print("Headers: ${_headers()}");
+    print("Body: ${jsonEncode(body)}");
+
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: _headers(),
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 10));
+
+      print("=== ApiService POST Response ===");
+      print("Status Code: ${response.statusCode}");
+      print("Body: ${response.body}");
+      return response;
+    } catch (e) {
+      print("=== ApiService POST Error ===");
+      print("Error: $e");
+      rethrow;
+    }
   }
 }

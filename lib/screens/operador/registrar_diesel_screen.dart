@@ -33,6 +33,7 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
   double? _longitude;
   
   bool _yaRegistrado = false;
+  bool _validandoEstatus = true;
   Map<String, dynamic>? _dieselDatos;
   int? _idAsignacion;
   String _numContenedor = "N/A";
@@ -46,46 +47,67 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
   }
 
   Future<void> _checkStatus() async {
-    final opData = await ApiService.getUserData();
-    if (opData != null) {
-      final dynamic asigId = opData["id_asignacion"];
-      setState(() {
-        _idAsignacion = int.tryParse(asigId?.toString() ?? "");
-        _numContenedor = opData["num_contenedor"]?.toString() ?? "N/A";
-        _unidad = opData["unidad"]?.toString() ?? "N/A";
-      });
-      if (_idAsignacion != null) {
-        final prefs = await SharedPreferences.getInstance();
-        final localKey = 'diesel_registrado_$_idAsignacion';
-        if (prefs.getBool(localKey) == true) {
-          setState(() {
-            _yaRegistrado = true;
-          });
-        }
-        
-        try {
-          final response = await ApiService.post(
-            ApiEndpoints.estatusFlujo,
-            {"id_asignacion": _idAsignacion},
-          );
-          if (response.statusCode == 200) {
-            final resData = jsonDecode(response.body);
-            if (resData["data"] != null) {
-              final data = resData["data"];
-              final bool reg = data["diesel_registrado"] == true;
-              
-              // Guardar localmente
-              await prefs.setBool(localKey, reg);
-              
+    setState(() {
+      _validandoEstatus = true;
+    });
+    try {
+      final opData = await ApiService.getUserData();
+      if (opData != null) {
+        final dynamic asigId = opData["id_asignacion"];
+        setState(() {
+          _idAsignacion = int.tryParse(asigId?.toString() ?? "");
+          _numContenedor = opData["num_contenedor"]?.toString() ?? "N/A";
+          _unidad = opData["unidad"]?.toString() ?? "N/A";
+        });
+        if (_idAsignacion != null) {
+          final prefs = await SharedPreferences.getInstance();
+          final localKey = 'diesel_registrado_$_idAsignacion';
+          
+          try {
+            final response = await ApiService.post(
+              ApiEndpoints.estatusFlujo,
+              {"id_asignacion": _idAsignacion},
+            );
+            if (response.statusCode == 200) {
+              final resData = jsonDecode(response.body);
+              if (resData["data"] != null) {
+                final data = resData["data"];
+                final bool reg = data["diesel_registrado"] == true;
+                
+                // Guardar localmente
+                await prefs.setBool(localKey, reg);
+                
+                setState(() {
+                  _yaRegistrado = reg;
+                  _dieselDatos = reg ? data["diesel_datos"] : null;
+                });
+              }
+            } else {
+              // Fallback a caché local si la API responde con error
+              if (prefs.getBool(localKey) == true) {
+                setState(() {
+                  _yaRegistrado = true;
+                });
+              }
+            }
+          } catch (e) {
+            print("Error checking flow status: $e");
+            // Fallback a caché local si falla la conexión
+            if (prefs.getBool(localKey) == true) {
               setState(() {
-                _yaRegistrado = reg;
-                _dieselDatos = reg ? data["diesel_datos"] : null;
+                _yaRegistrado = true;
               });
             }
           }
-        } catch (e) {
-          print("Error checking flow status: $e");
         }
+      }
+    } catch (e) {
+      print("Error loading operator data: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _validandoEstatus = false;
+        });
       }
     }
   }
@@ -395,8 +417,46 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
             ),
             const SizedBox(height: 20),
 
-            _yaRegistrado
+            _validandoEstatus
                 ? Card(
+                    elevation: 1,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        children: [
+                          const Center(
+                            child: SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: CircularProgressIndicator(strokeWidth: 3),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Center(
+                            child: Text(
+                              "Cargando información...",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.blue.shade800,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Center(
+                            child: Text(
+                              "Validando el estatus actual con el servidor.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.black54, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : _yaRegistrado
+                    ? Card(
                     color: Colors.green.shade50,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),

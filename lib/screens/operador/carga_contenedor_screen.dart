@@ -21,6 +21,7 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
   bool _isLoading = false;
   
   bool _yaRegistrado = false;
+  bool _validandoEstatus = true;
   List<String> _fotosGuardadas = [];
 
   Map<String, dynamic>? _operatorData;
@@ -44,18 +45,31 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
         _idAsignacion = int.tryParse(data["id_asignacion"]?.toString() ?? "");
       });
       _checkStatus();
+    } else {
+      if (mounted) {
+        setState(() {
+          _validandoEstatus = false;
+        });
+      }
     }
   }
 
   Future<void> _checkStatus() async {
-    if (_idAsignacion == null) return;
+    if (_idAsignacion == null) {
+      if (mounted) {
+        setState(() {
+          _validandoEstatus = false;
+        });
+      }
+      return;
+    }
+    
+    setState(() {
+      _validandoEstatus = true;
+    });
+
     final prefs = await SharedPreferences.getInstance();
     final localKey = 'viaje_iniciado_$_idAsignacion';
-    if (prefs.getBool(localKey) == true) {
-      setState(() {
-        _yaRegistrado = true;
-      });
-    }
 
     try {
       final response = await ApiService.post(
@@ -73,9 +87,28 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
             _fotosGuardadas = reg ? List<String>.from(data["fotos"] ?? []) : [];
           });
         }
+      } else {
+        // Fallback a caché local si la API responde con error
+        if (prefs.getBool(localKey) == true) {
+          setState(() {
+            _yaRegistrado = true;
+          });
+        }
       }
     } catch (e) {
       print("Error checking flow status: $e");
+      // Fallback a caché local si falla la conexión
+      if (prefs.getBool(localKey) == true) {
+        setState(() {
+          _yaRegistrado = true;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _validandoEstatus = false;
+        });
+      }
     }
   }
 
@@ -326,7 +359,45 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
             ),
             const SizedBox(height: 25),
 
-            if (_yaRegistrado)
+            if (_validandoEstatus)
+              Card(
+                elevation: 1,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    children: [
+                      const Center(
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: CircularProgressIndicator(strokeWidth: 3),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Center(
+                        child: Text(
+                          "Cargando información...",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: Colors.blue.shade800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Center(
+                        child: Text(
+                          "Validando el estatus actual con el servidor.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.black54, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (_yaRegistrado)
               Card(
                 color: Colors.green.shade50,
                 shape: RoundedRectangleBorder(

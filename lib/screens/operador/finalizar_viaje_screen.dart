@@ -21,6 +21,7 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
   bool _isLoading = false;
   
   bool _yaRegistrado = false;
+  bool _validandoEstatus = true;
   List<String> _fotosGuardadas = [];
   
   String? _gpsCoordinates;
@@ -94,50 +95,72 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
   }
 
   Future<void> _loadOperatorInfo() async {
-    final data = await ApiService.getUserData();
-    if (data != null && mounted) {
-      setState(() {
-        _operatorData = data;
-        _numContenedor = data["num_contenedor"]?.toString() ?? "N/A";
-        _unidad = data["unidad"]?.toString() ?? "N/A";
-        final dynamic asigId = data["id_asignacion"];
-        _idAsignacion = int.tryParse(asigId?.toString() ?? "");
-      });
+    setState(() {
+      _validandoEstatus = true;
+    });
 
-      if (_idAsignacion != null) {
-        final prefs = await SharedPreferences.getInstance();
-        final localKey = 'viaje_finalizado_$_idAsignacion';
-        if (prefs.getBool(localKey) == true) {
-          setState(() {
-            _yaRegistrado = true;
-          });
-        }
+    try {
+      final data = await ApiService.getUserData();
+      if (data != null && mounted) {
+        setState(() {
+          _operatorData = data;
+          _numContenedor = data["num_contenedor"]?.toString() ?? "N/A";
+          _unidad = data["unidad"]?.toString() ?? "N/A";
+          final dynamic asigId = data["id_asignacion"];
+          _idAsignacion = int.tryParse(asigId?.toString() ?? "");
+        });
 
-        try {
-          final response = await ApiService.post(
-            ApiEndpoints.estatusFlujo,
-            {"id_asignacion": _idAsignacion},
-          );
+        if (_idAsignacion != null) {
+          final prefs = await SharedPreferences.getInstance();
+          final localKey = 'viaje_finalizado_$_idAsignacion';
 
-          if (response.statusCode == 200 && mounted) {
-            final resData = jsonDecode(response.body);
-            if (resData["data"] != null) {
-              final dataObj = resData["data"];
-              final bool finished = dataObj["viaje_finalizado"] == true;
-              
-              await prefs.setBool(localKey, finished);
+          try {
+            final response = await ApiService.post(
+              ApiEndpoints.estatusFlujo,
+              {"id_asignacion": _idAsignacion},
+            );
 
+            if (response.statusCode == 200 && mounted) {
+              final resData = jsonDecode(response.body);
+              if (resData["data"] != null) {
+                final dataObj = resData["data"];
+                final bool finished = dataObj["viaje_finalizado"] == true;
+                
+                await prefs.setBool(localKey, finished);
+
+                setState(() {
+                  _yaRegistrado = finished;
+                  if (dataObj["fotos_fin"] != null) {
+                    _fotosGuardadas = List<String>.from(dataObj["fotos_fin"]);
+                  }
+                });
+              }
+            } else {
+              // Fallback a caché local si la API responde con error
+              if (prefs.getBool(localKey) == true) {
+                setState(() {
+                  _yaRegistrado = true;
+                });
+              }
+            }
+          } catch (e) {
+            print("Error retrieving flow status: $e");
+            // Fallback a caché local si falla la conexión
+            if (prefs.getBool(localKey) == true) {
               setState(() {
-                _yaRegistrado = finished;
-                if (dataObj["fotos_fin"] != null) {
-                  _fotosGuardadas = List<String>.from(dataObj["fotos_fin"]);
-                }
+                _yaRegistrado = true;
               });
             }
           }
-        } catch (e) {
-          print("Error retrieving flow status: $e");
         }
+      }
+    } catch (e) {
+      print("Error loading operator data: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _validandoEstatus = false;
+        });
       }
     }
   }
@@ -299,8 +322,46 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
             ),
             const SizedBox(height: 20),
 
-            _yaRegistrado
+            _validandoEstatus
                 ? Card(
+                    elevation: 1,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        children: [
+                          const Center(
+                            child: SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: CircularProgressIndicator(strokeWidth: 3),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Center(
+                            child: Text(
+                              "Cargando información...",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.blue.shade800,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Center(
+                            child: Text(
+                              "Validando el estatus actual con el servidor.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.black54, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : _yaRegistrado
+                    ? Card(
                     color: Colors.green.shade50,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
