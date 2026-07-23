@@ -1,7 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiConfig {
-  static String baseUrl = "https://sgt.gologipro.com/api";
+  static String baseUrl = "http://127.0.0.1:8080/api";
 
   static Future<void> loadConfig() async {
     final prefs = await SharedPreferences.getInstance();

@@ -49,7 +49,7 @@ class _UsuarioLoginScreenState extends State<UsuarioLoginScreen> {
           await ApiService.setToken(token.toString(), type: 'usuario');
         }
         if (data["data"] != null) {
-          await ApiService.saveUserData(data["data"]);
+          await ApiService.saveUserData(Map<String, dynamic>.from(data["data"]));
         }
         if (mounted) {
           Navigator.pushReplacement(

@@ -1,13 +1,18 @@
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
+import 'package:flutter_map/flutter_map.dart' as fmap;
 import 'package:latlong2/latlong.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '/config/api_config.dart';
 
 class UsuarioModuleScreen extends StatefulWidget {
@@ -33,7 +38,10 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
   String debugErrorMessage = "";
   Map<String, dynamic> reportStats = {};
   final TextEditingController searchController = TextEditingController();
-  final MapController _mapController = MapController();
+  gmaps.GoogleMapController? _googleMapController;
+  final fmap.MapController _mapController = fmap.MapController();
+  Map<String, gmaps.BitmapDescriptor> _customMarkerIcons = {};
+  Set<String> _selectedCardIds = {};
   Map<String, dynamic>? _selectedGpsItem;
   bool _showCamion = true;
   bool _showChasisA = true;
@@ -52,9 +60,19 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
   List<Map<String, String>> _clientes = [];
   bool _loadingLines = false;
 
+  // Planeacion variables
+  DateTime? _planeacionFechaInicio;
+  DateTime? _planeacionFechaFin;
+  bool _canFinalize = false;
+  bool _canAnular = false;
+  bool _isSuperUser = false;
+
   @override
   void initState() {
     super.initState();
+    _planeacionFechaInicio = DateTime.now().subtract(const Duration(days: 15));
+    _planeacionFechaFin = DateTime.now().add(const Duration(days: 15));
+    _loadPermissions();
     if (widget.module != 'monitoreo') {
       fetchData();
     } else {
@@ -68,6 +86,121 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     _refreshTimer?.cancel();
     searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPermissions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? userRaw = prefs.getString('user_data');
+    if (userRaw != null) {
+      try {
+        final Map<String, dynamic> data = jsonDecode(userRaw);
+        if (data["user"] != null) {
+          final Map<String, dynamic> user = data["user"];
+          final List<dynamic> permsList = user["permissions"] ?? [];
+          setState(() {
+            _isSuperUser = permsList.contains('superuser');
+            _canFinalize = permsList.contains('planeacion-finalizar') || _isSuperUser;
+            _canAnular = permsList.contains('planeacion-delete') || _isSuperUser;
+          });
+        }
+      } catch (e) {
+        // Fallback
+      }
+    }
+  }
+
+  Future<void> _finalizarViaje(int containerId) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Finalizar Viaje"),
+        content: const Text("¿Está seguro que desea finalizar este viaje?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text("Finalizar"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      final response = await ApiService.post(
+        "${ApiConfig.baseUrl}/dashboard/finalizar-viaje",
+        {"idContenendor": containerId},
+      );
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data["TMensaje"] == "success") {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data["Mensaje"] ?? "Viaje finalizado con éxito"), backgroundColor: Colors.green),
+        );
+        fetchData();
+      } else {
+        throw Exception(data["Mensaje"] ?? "Error al finalizar el viaje");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _anularPlaneacion(int containerId) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Deshacer Planeación"),
+        content: const Text("¿Está seguro de que desea deshacer esta planeación? Esta acción es irreversible y devolverá la cotización a estado Aprobada."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text("Confirmar"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      final response = await ApiService.post(
+        "${ApiConfig.baseUrl}/dashboard/anular-planeacion",
+        {"idContenendor": containerId},
+      );
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data["TMensaje"] == "success") {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data["Mensaje"] ?? "Planeación anulada con éxito"), backgroundColor: Colors.green),
+        );
+        fetchData();
+      } else {
+        throw Exception(data["Mensaje"] ?? "Error al deshacer planeación");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   String _getEndpointUrl() {
@@ -91,10 +224,12 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     }
   }
 
-  Future<void> fetchData() async {
+  Future<void> fetchData({bool isSilent = false}) async {
     if (mounted) {
       setState(() {
-        isLoading = true;
+        if (!isSilent) {
+          isLoading = true;
+        }
         debugErrorMessage = "";
       });
     }
@@ -109,6 +244,15 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
       if (_selectedFechaSalida != null) {
         final String formattedDate = "${_selectedFechaSalida!.year}-${_selectedFechaSalida!.month.toString().padLeft(2, '0')}-${_selectedFechaSalida!.day.toString().padLeft(2, '0')}";
         queryParams.add("fecha_salida=$formattedDate");
+      }
+      url = "$url?${queryParams.join('&')}";
+    } else if (widget.module == 'planeacion') {
+      final List<String> queryParams = [];
+      if (_planeacionFechaInicio != null) {
+        queryParams.add("fecha_inicio=${_planeacionFechaInicio!.year}-${_planeacionFechaInicio!.month.toString().padLeft(2, '0')}-${_planeacionFechaInicio!.day.toString().padLeft(2, '0')}");
+      }
+      if (_planeacionFechaFin != null) {
+        queryParams.add("fecha_fin=${_planeacionFechaFin!.year}-${_planeacionFechaFin!.month.toString().padLeft(2, '0')}-${_planeacionFechaFin!.day.toString().padLeft(2, '0')}");
       }
       url = "$url?${queryParams.join('&')}";
     }
@@ -233,6 +377,25 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
               filteredItems = typeFiltered;
               isMockData = false;
               isLoading = false;
+              
+              if (_selectedCardIds.isEmpty) {
+                int count = 0;
+                for (var item in typeFiltered) {
+                  final String tipoItem = item["tipo_item"]?.toString() ?? "";
+                  final String tipo = (item["tipo"]?.toString() ?? "").toLowerCase();
+                  if (tipoItem == "contenedor" && tipo == "camion") {
+                    final String itemKey = "${item['tipo_item']}_${item['id'] ?? item['contenedor']}";
+                    _selectedCardIds.add(itemKey);
+                    count++;
+                    if (count >= 2) break;
+                  } else if (tipoItem != "contenedor") {
+                    final String itemKey = "${item['tipo_item']}_${item['id'] ?? item['id_equipo'] ?? item['nombre']}";
+                    _selectedCardIds.add(itemKey);
+                    count++;
+                    if (count >= 2) break;
+                  }
+                }
+              }
             });
           }
           return;
@@ -1220,7 +1383,12 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
 
   String _getItemName(Map<String, dynamic> item) {
     final String tipoItem = item["tipo_item"]?.toString() ?? "equipo";
+    final String subTipo = (item["tipo"]?.toString() ?? "").toLowerCase();
+
     if (tipoItem == "contenedor") {
+      if (subTipo == "chasis" || subTipo == "chasis b" || subTipo == "plataforma") {
+        return item["id_equipo"]?.toString() ?? item["placas"]?.toString() ?? "Chasis";
+      }
       return item["contenedor"]?.toString() ?? item["num_contenedor"]?.toString() ?? "Contenedor";
     } else if (tipoItem == "convoy") {
       return item["nombre"]?.toString() ?? "Convoy ${item["no_conboy"]}";
@@ -1256,6 +1424,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
         if (data == null) throw Exception("No data");
         final dynamic docum = data["documentos"];
         final dynamic cotizacion = data["cotizacion"];
+        final String? waText = data["wa_text"]?.toString();
         
         if (docum == null) {
           throw Exception("No data");
@@ -1267,7 +1436,6 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
         final String fechaInicio = docum["fecha_inicio"]?.toString() ?? "S/N";
         final String fechaFin = docum["fecha_fin"]?.toString() ?? "S/N";
         final String contrato = docum["tipo_contrato"]?.toString() ?? "S/N";
-        final bool esFull = cotizacion?["referencia_full"] != null;
         
         final String operador = docum["operador"]?.toString() ?? "S/N";
         final String contacto = cotizacion?["cp_contacto_entrega"]?.toString() ?? "S/N";
@@ -1341,51 +1509,70 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 6),
+                          Text(cliente, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                          const Divider(),
+                          const Text("ORIGEN / DESTINO:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
                           const SizedBox(height: 4),
-                          Text(cliente, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                          const SizedBox(height: 4),
-                          Text(esFull ? "FULL 🧱" : "Sencillo 🚛", style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+                          Text(origen, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)),
+                          const SizedBox(height: 2),
+                          const Icon(Icons.arrow_downward, size: 16, color: Colors.blueGrey),
+                          const SizedBox(height: 2),
+                          Text(destino, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)),
+                          const Divider(),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text("INICIO:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
+                                    const SizedBox(height: 4),
+                                    Text(fechaInicio, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text("FIN:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
+                                    const SizedBox(height: 4),
+                                    Text(fechaFin, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
 
                     _buildWebModalSection(
-                      title: "Datos del viaje",
-                      icon: Icons.route,
-                      color: Colors.blue.shade700,
-                      children: [
-                        _webModalRow("Origen:", origen),
-                        _webModalRow("Destino:", destino),
-                        _webModalRow("Fecha Inicio:", fechaInicio),
-                        _webModalRow("Fecha Fin:", fechaFin),
-                      ],
-                    ),
-
-                    _buildWebModalSection(
-                      title: "Contacto / Operador",
+                      title: "Beneficiario",
                       icon: Icons.person,
-                      color: Colors.green.shade700,
+                      color: Colors.blue,
                       children: [
-                        _webModalRow("Contacto:", contacto),
                         _webModalRow("Operador:", operador),
+                        _webModalRow("Contacto:", contacto),
                         _webModalRow("Teléfono:", telefono),
                       ],
                     ),
 
                     _buildWebModalSection(
-                      title: "Transporte",
-                      icon: Icons.local_shipping,
-                      color: Colors.purple.shade700,
+                      title: "Transportista",
+                      icon: Icons.business,
+                      color: Colors.teal,
                       children: [
-                        _webModalRow("Proveedor:", empresa),
+                        _webModalRow("Empresa:", empresa),
                         _webModalRow("Transportista:", transportista),
                       ],
                     ),
 
                     _buildWebModalSection(
-                      title: "Equipos / GPS",
-                      icon: Icons.settings_remote,
-                      color: Colors.orange.shade700,
+                      title: "Equipo Asignado",
+                      icon: Icons.airport_shuttle,
+                      color: Colors.orange,
                       children: [
                         const Text("Tracto:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                         _webModalRow("  IMEI:", tractoImei),
@@ -1408,6 +1595,23 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
                 child: const Text("Cerrar", style: TextStyle(color: Colors.white)),
               ),
+              if (waText != null && waText.isNotEmpty)
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final String encodedText = Uri.encodeComponent(waText);
+                    final Uri waUri = Uri.parse("https://api.whatsapp.com/send?text=$encodedText");
+                    if (await canLaunchUrl(waUri)) {
+                      await launchUrl(waUri, mode: LaunchMode.externalApplication);
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("No se pudo abrir WhatsApp")),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.share, color: Colors.white, size: 16),
+                  label: const Text("Compartir WhatsApp", style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                ),
             ],
           ),
         );
@@ -1533,7 +1737,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
               Icon(
                 isCompleted ? Icons.check_circle : Icons.cancel,
                 color: isCompleted ? Colors.green : Colors.grey.shade400,
-              )
+              ),
             ],
           ),
         ),
@@ -1541,8 +1745,200 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     );
   }
 
-  List<Marker> _buildGpsMarkers() {
-    final List<Marker> markers = [];
+  Future<gmaps.BitmapDescriptor> _createCustomMarkerIcon(
+      Color color, String mainTitle, String subTitle, String typeLetter, bool isStopped) async {
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final ui.Canvas canvas = ui.Canvas(pictureRecorder);
+    const double width = 360.0;
+    const double height = 110.0;
+
+    final ui.Paint bubblePaint = ui.Paint()
+      ..color = const Color(0xE62E4053)
+      ..style = ui.PaintingStyle.fill;
+      
+    final ui.Paint bubbleBorderPaint = ui.Paint()
+      ..color = Colors.white.withOpacity(0.3)
+      ..style = ui.PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    final RRect bubbleRect = RRect.fromLTRBAndCorners(
+      85.0, 15.0, 350.0, 95.0,
+      topLeft: const Radius.circular(12),
+      topRight: const Radius.circular(12),
+      bottomLeft: const Radius.circular(12),
+      bottomRight: const Radius.circular(12),
+    );
+    canvas.drawRRect(bubbleRect, bubblePaint);
+    canvas.drawRRect(bubbleRect, bubbleBorderPaint);
+
+    final ui.Paint pinPaint = ui.Paint()
+      ..color = color
+      ..style = ui.PaintingStyle.fill;
+    final ui.Paint pinBorderPaint = ui.Paint()
+      ..color = Colors.white
+      ..style = ui.PaintingStyle.stroke
+      ..strokeWidth = 3.0;
+
+    final ui.Path path = ui.Path();
+    path.moveTo(45.0, height - 15.0);
+    path.lineTo(35.0, height - 40.0);
+    path.lineTo(55.0, height - 40.0);
+    path.close();
+    canvas.drawPath(path, pinPaint);
+    canvas.drawPath(path, pinBorderPaint);
+
+    canvas.drawCircle(const Offset(45.0, 45.0), 30.0, pinPaint);
+    canvas.drawCircle(const Offset(45.0, 45.0), 30.0, pinBorderPaint);
+
+    final TextPainter letterPainter = TextPainter(textDirection: TextDirection.ltr);
+    letterPainter.text = TextSpan(
+      text: typeLetter,
+      style: const TextStyle(
+        fontSize: 28,
+        fontWeight: FontWeight.w900,
+        color: Colors.white,
+      ),
+    );
+    letterPainter.layout();
+    letterPainter.paint(canvas, Offset(45.0 - letterPainter.width / 2, 45.0 - letterPainter.height / 2));
+
+    final ui.Paint badgePaint = ui.Paint()
+      ..color = color
+      ..style = ui.PaintingStyle.fill;
+    final RRect badgeRect = RRect.fromRectAndRadius(
+      const Rect.fromLTRB(20.0, 78.0, 70.0, 92.0),
+      const Radius.circular(4),
+    );
+    canvas.drawRRect(badgeRect, badgePaint);
+
+    final TextPainter statusPainter = TextPainter(textDirection: TextDirection.ltr);
+    statusPainter.text = TextSpan(
+      text: isStopped ? "DET" : "RUTA",
+      style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white),
+    );
+    statusPainter.layout();
+    statusPainter.paint(canvas, Offset(45.0 - statusPainter.width / 2, 85.0 - statusPainter.height / 2));
+
+    final TextPainter titlePainter = TextPainter(textDirection: TextDirection.ltr);
+    titlePainter.text = TextSpan(
+      text: mainTitle,
+      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+    );
+    titlePainter.layout();
+    titlePainter.paint(canvas, const Offset(100.0, 24.0));
+
+    final TextPainter subTitlePainter = TextPainter(textDirection: TextDirection.ltr);
+    subTitlePainter.text = TextSpan(
+      text: subTitle.toUpperCase(),
+      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white.withOpacity(0.85)),
+    );
+    subTitlePainter.layout();
+    subTitlePainter.paint(canvas, const Offset(100.0, 46.0));
+
+    final TextPainter statusLinePainter = TextPainter(textDirection: TextDirection.ltr);
+    statusLinePainter.text = TextSpan(
+      text: isStopped ? "DETENIDO" : "EN MOVIMIENTO",
+      style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color),
+    );
+    statusLinePainter.layout();
+    statusLinePainter.paint(canvas, const Offset(100.0, 66.0));
+
+    final image = await pictureRecorder.endRecording().toImage(width.toInt(), height.toInt());
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return gmaps.BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
+  }
+
+  void _loadCustomMarkerIcon(String key, Color color, String mainTitle, String subTitle, String typeLetter, bool isStopped) async {
+    if (_customMarkerIcons.containsKey(key)) return;
+    try {
+      final icon = await _createCustomMarkerIcon(color, mainTitle, subTitle, typeLetter, isStopped);
+      if (mounted) {
+        setState(() {
+          _customMarkerIcons[key] = icon;
+        });
+      }
+    } catch (e) {
+      // Fallback
+    }
+  }
+
+  Set<gmaps.Marker> _buildGoogleGpsMarkers() {
+    final Set<gmaps.Marker> markers = {};
+    for (var item in filteredItems) {
+      final String tipoItem = item["tipo_item"]?.toString() ?? "equipo";
+      if (tipoItem == "contenedor" && !_showContenedores) continue;
+      if (tipoItem == "equipo" && !_showEquipos) continue;
+
+      final double? lat = double.tryParse(item["lat"]?.toString() ?? item["latitud"]?.toString() ?? "");
+      final double? lng = double.tryParse(item["lng"]?.toString() ?? item["longitud"]?.toString() ?? "");
+      if (lat == null || lng == null || lat == 0 || lng == 0) continue;
+
+      final String tipo = (item["tipo"]?.toString() ?? "camion").toLowerCase();
+      if (tipo.contains("chasis") || tipo.contains("plataforma")) {
+        if (tipo.contains("b") || item["id_equipo"]?.toString().toLowerCase().contains("b") == true) {
+          if (!_showChasisB) continue;
+        } else {
+          if (!_showChasisA) continue;
+        }
+      } else {
+        if (!_showCamion) continue;
+      }
+
+      final String itemKey = tipoItem == "contenedor"
+          ? "${item['tipo_item']}_${item['id'] ?? item['contenedor']}"
+          : "${item['tipo_item']}_${item['id'] ?? item['id_equipo'] ?? item['nombre']}";
+          
+      if (!_selectedCardIds.contains(itemKey)) continue;
+
+      final isStopped = (item["velocidad"]?.toString() == "0" || 
+                         item["speed"]?.toString() == "0" || 
+                         (item["estatus"]?.toString().toLowerCase().contains("detenido") ?? false));
+
+      final String markerKey = "${item['tipo_item']}_${item['id'] ?? item['contenedor']}_$tipo";
+      final Color markerColor = isStopped ? Colors.orange.shade800 : Colors.green.shade600;
+      
+      String typeLetter = "T";
+      String subTitleLabel = "Tracto";
+      if (tipo.contains("chasis") || tipo.contains("plataforma")) {
+        if (tipo.contains("b") || item["id_equipo"]?.toString().toLowerCase().contains("b") == true) {
+          typeLetter = "B";
+          subTitleLabel = "Chasis B";
+        } else {
+          typeLetter = "A";
+          subTitleLabel = "Chasis A";
+        }
+      }
+      
+      final String idEquipo = item["id_equipo"]?.toString() ?? "";
+      final String formattedSubTitle = "$subTitleLabel${idEquipo.isNotEmpty ? ' - $idEquipo' : ''}";
+      
+      final String containerNum = item["contenedor"]?.toString() ?? item["num_contenedor"]?.toString() ?? _getItemName(item);
+      _loadCustomMarkerIcon(markerKey, markerColor, containerNum, formattedSubTitle, typeLetter, isStopped);
+      
+      final gmaps.BitmapDescriptor icon = _customMarkerIcons[markerKey] ?? gmaps.BitmapDescriptor.defaultMarkerWithHue(
+        isStopped ? gmaps.BitmapDescriptor.hueOrange : gmaps.BitmapDescriptor.hueGreen
+      );
+
+      markers.add(
+        gmaps.Marker(
+          markerId: gmaps.MarkerId(markerKey),
+          position: gmaps.LatLng(lat, lng),
+          icon: icon,
+          onTap: () {
+            setState(() {
+              _selectedGpsItem = item;
+            });
+            _googleMapController?.animateCamera(gmaps.CameraUpdate.newLatLngZoom(gmaps.LatLng(lat, lng), 15));
+            _fetchDestinationAndRoute(item, LatLng(lat, lng));
+          },
+        ),
+      );
+    }
+    return markers;
+  }
+
+  List<fmap.Marker> _buildFlutterMapMarkers() {
+    final List<fmap.Marker> markers = [];
     for (var item in filteredItems) {
       final String tipoItem = item["tipo_item"]?.toString() ?? "equipo";
       if (tipoItem == "contenedor" && !_showContenedores) continue;
@@ -1566,11 +1962,11 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
       final isStopped = (item["velocidad"]?.toString() == "0" || 
                          item["speed"]?.toString() == "0" || 
                          (item["estatus"]?.toString().toLowerCase().contains("detenido") ?? false));
-                          
+                           
       final Color markerColor = isStopped ? Colors.red : Colors.green;
 
       markers.add(
-        Marker(
+        fmap.Marker(
           point: LatLng(lat, lng),
           width: 90,
           height: 90,
@@ -1624,6 +2020,144 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     return markers;
   }
 
+  void _showUnitSelectionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        String filterText = "";
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final List<Map<String, dynamic>> searchResults = filteredItems.where((item) {
+              final String name = _getItemName(item).toLowerCase();
+              final String type = (item["tipo_item"] ?? "").toString().toLowerCase();
+              return name.contains(filterText.toLowerCase()) || type.contains(filterText.toLowerCase());
+            }).toList();
+
+            return AlertDialog(
+              title: const Text("Seleccionar Unidad / Convoy"),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(
+                        hintText: "Buscar por nombre, contenedor...",
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (val) {
+                        setDialogState(() {
+                          filterText = val;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: searchResults.length + 1,
+                        itemBuilder: (context, index) {
+                          if (index == 0) {
+                            return ListTile(
+                              leading: const Icon(Icons.map, color: Colors.blue),
+                              title: const Text("Mostrar Todos (Centrar)"),
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (filteredItems.isNotEmpty) {
+                                  for (var item in filteredItems) {
+                                    final double? lat = double.tryParse(item["lat"]?.toString() ?? item["latitud"]?.toString() ?? "");
+                                    final double? lng = double.tryParse(item["lng"]?.toString() ?? item["longitud"]?.toString() ?? "");
+                                    if (lat != null && lng != null && lat != 0 && lng != 0) {
+                                      final bool useGoogleMaps = kIsWeb || (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS);
+                                      if (useGoogleMaps) {
+                                        _googleMapController?.animateCamera(
+                                          gmaps.CameraUpdate.newLatLngZoom(gmaps.LatLng(lat, lng), 10),
+                                        );
+                                      } else {
+                                        _mapController.move(LatLng(lat, lng), 10);
+                                      }
+                                      break;
+                                    }
+                                  }
+                                }
+                              },
+                            );
+                          }
+                          final item = searchResults[index - 1];
+                          final String name = _getItemName(item);
+                          final String type = item["tipo_item"] == "contenedor"
+                              ? "Contenedor"
+                              : item["tipo_item"] == "convoy"
+                                  ? "Convoy"
+                                  : "Equipo";
+                          final double? lat = double.tryParse(item["lat"]?.toString() ?? item["latitud"]?.toString() ?? "");
+                          final double? lng = double.tryParse(item["lng"]?.toString() ?? item["longitud"]?.toString() ?? "");
+                          final bool hasCoords = lat != null && lng != null && lat != 0 && lng != 0;
+                          
+                          final String itemKey = item["tipo_item"] == "contenedor"
+                              ? "${item['tipo_item']}_${item['id'] ?? item['contenedor']}"
+                              : "${item['tipo_item']}_${item['id'] ?? item['id_equipo'] ?? item['nombre']}";
+                          final bool isPinned = _selectedCardIds.contains(itemKey);
+
+                          return ListTile(
+                            leading: Icon(
+                              item["tipo_item"] == "contenedor"
+                                  ? Icons.inventory_2
+                                  : item["tipo_item"] == "convoy"
+                                      ? Icons.group_work
+                                      : Icons.local_shipping,
+                              color: hasCoords ? Colors.green : Colors.grey,
+                            ),
+                            title: Text(name),
+                            subtitle: Text("$type ${hasCoords ? '' : '(Sin señal)'}"),
+                            trailing: Checkbox(
+                              activeColor: Colors.blue.shade700,
+                              value: isPinned,
+                              onChanged: (val) {
+                                setDialogState(() {
+                                  if (val == true) {
+                                    _selectedCardIds.add(itemKey);
+                                  } else {
+                                    _selectedCardIds.remove(itemKey);
+                                  }
+                                });
+                                setState(() {});
+                              },
+                            ),
+                            onTap: !hasCoords ? null : () {
+                              Navigator.pop(context);
+                              setState(() {
+                                _selectedGpsItem = item;
+                              });
+                              final bool useGoogleMaps = kIsWeb || (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS);
+                              if (useGoogleMaps) {
+                                _googleMapController?.animateCamera(
+                                  gmaps.CameraUpdate.newLatLngZoom(gmaps.LatLng(lat!, lng!), 15),
+                                );
+                              } else {
+                                _mapController.move(LatLng(lat!, lng!), 15);
+                              }
+                              _fetchDestinationAndRoute(item, LatLng(lat, lng));
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cerrar"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _fetchRoute(LatLng start, LatLng end) async {
     try {
       final url = Uri.parse(
@@ -1647,6 +2181,22 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
   }
 
   Widget _buildGpsMonitoreoView() {
+    final List<Map<String, dynamic>> visibleCards = filteredItems.where((item) {
+      final String tipoItem = item["tipo_item"]?.toString() ?? "";
+      final String tipo = (item["tipo"]?.toString() ?? "").toLowerCase();
+      
+      // Exclude sub-equipments (Chasis A / Chasis B) from getting their own cards
+      if (tipoItem == "contenedor" && (tipo == "chasis" || tipo == "chasis b" || tipo == "plataforma")) {
+        return false;
+      }
+      
+      final String itemKey = tipoItem == "contenedor"
+          ? "${item['tipo_item']}_${item['id'] ?? item['contenedor']}"
+          : "${item['tipo_item']}_${item['id'] ?? item['id_equipo'] ?? item['nombre']}";
+          
+      return _selectedCardIds.contains(itemKey);
+    }).toList();
+
     LatLng initialCenter = const LatLng(19.4326, -99.1332);
     for (var item in filteredItems) {
       final double? lat = double.tryParse(item["lat"]?.toString() ?? item["latitud"]?.toString() ?? "");
@@ -1666,125 +2216,165 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
 
     return Stack(
       children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: initialCenter,
-            initialZoom: 10,
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-              userAgentPackageName: 'com.sgtlogistics.app',
-            ),
-            if (_showRoute && _routePoints.isNotEmpty)
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: _routePoints,
-                    strokeWidth: 4,
+        (() {
+          final bool useGoogleMaps = kIsWeb || (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS);
+          if (useGoogleMaps) {
+            return gmaps.GoogleMap(
+              initialCameraPosition: gmaps.CameraPosition(
+                target: gmaps.LatLng(initialCenter.latitude, initialCenter.longitude),
+                zoom: 10,
+              ),
+              onMapCreated: (controller) {
+                _googleMapController = controller;
+              },
+              markers: _buildGoogleGpsMarkers(),
+              polylines: {
+                if (_showRoute && _routePoints.isNotEmpty)
+                  gmaps.Polyline(
+                    polylineId: const gmaps.PolylineId("route"),
+                    points: _routePoints.map((p) => gmaps.LatLng(p.latitude, p.longitude)).toList(),
+                    width: 4,
                     color: Colors.blue.shade700,
                   ),
-                ],
+              },
+            );
+          } else {
+            return fmap.FlutterMap(
+              mapController: _mapController,
+              options: fmap.MapOptions(
+                initialCenter: initialCenter,
+                initialZoom: 10,
               ),
-            MarkerLayer(
-              markers: _buildGpsMarkers(),
-            ),
-          ],
-        ),
+              children: [
+                fmap.TileLayer(
+                  urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                  userAgentPackageName: 'com.sgtlogistics.app',
+                ),
+                if (_showRoute && _routePoints.isNotEmpty)
+                  fmap.PolylineLayer(
+                    polylines: [
+                      fmap.Polyline(
+                        points: _routePoints,
+                        strokeWidth: 4,
+                        color: Colors.blue.shade700,
+                      ),
+                    ],
+                  ),
+                fmap.MarkerLayer(
+                  markers: _buildFlutterMapMarkers(),
+                ),
+              ],
+            );
+          }
+        })(),
 
         // Botón flotante superior derecho para filtros y vista
         Positioned(
           top: 16,
           right: 16,
-          child: FloatingActionButton.small(
-            heroTag: "mapFilterBtn",
-            backgroundColor: Colors.white,
-            foregroundColor: hasActiveGps ? Colors.blueGrey.shade800 : Colors.grey.shade400,
-            onPressed: !hasActiveGps
-                ? () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Opción deshabilitada: No hay equipos activos con señal GPS en el mapa."),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  }
-                : () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text("Mostrar en Mapa"),
-                        content: StatefulBuilder(
-                          builder: (context, setDialogState) {
-                            return Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CheckboxListTile(
-                                  title: const Text("Contenedores Activos (Viajes)"),
-                                  value: _showContenedores,
-                                  activeColor: Colors.blue.shade700,
-                                  onChanged: (val) {
-                                    setDialogState(() => _showContenedores = val ?? true);
-                                    setState(() {});
-                                  },
-                                ),
-                                CheckboxListTile(
-                                  title: const Text("Equipos en General"),
-                                  value: _showEquipos,
-                                  activeColor: Colors.blue.shade700,
-                                  onChanged: (val) {
-                                    setDialogState(() => _showEquipos = val ?? true);
-                                    setState(() {});
-                                  },
-                                ),
-                                const Divider(),
-                                CheckboxListTile(
-                                  title: const Text("Tractos (Camiones)"),
-                                  value: _showCamion,
-                                  onChanged: (val) {
-                                    setDialogState(() => _showCamion = val ?? true);
-                                    setState(() {});
-                                  },
-                                ),
-                                CheckboxListTile(
-                                  title: const Text("Chasis A"),
-                                  value: _showChasisA,
-                                  onChanged: (val) {
-                                    setDialogState(() => _showChasisA = val ?? true);
-                                    setState(() {});
-                                  },
-                                ),
-                                CheckboxListTile(
-                                  title: const Text("Chasis B"),
-                                  value: _showChasisB,
-                                  onChanged: (val) {
-                                    setDialogState(() => _showChasisB = val ?? true);
-                                    setState(() {});
-                                  },
-                                ),
-                                CheckboxListTile(
-                                  title: const Text("Trazar Ruta de Viaje"),
-                                  value: _showRoute,
-                                  onChanged: (val) {
-                                    setDialogState(() => _showRoute = val ?? true);
-                                    setState(() {});
-                                  },
-                                ),
-                              ],
-                            );
-                          }
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text("Aceptar"),
-                          )
-                        ],
-                      ),
-                    );
-                  },
-            child: const Icon(Icons.tune),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FloatingActionButton.small(
+                heroTag: "mapFilterBtn",
+                backgroundColor: Colors.white,
+                foregroundColor: hasActiveGps ? Colors.blueGrey.shade800 : Colors.grey.shade400,
+                onPressed: !hasActiveGps
+                    ? () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Opción deshabilitada: No hay equipos activos con señal GPS en el mapa."),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    : () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text("Mostrar en Mapa"),
+                            content: StatefulBuilder(
+                              builder: (context, setDialogState) {
+                                return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CheckboxListTile(
+                                      title: const Text("Contenedores Activos (Viajes)"),
+                                      value: _showContenedores,
+                                      activeColor: Colors.blue.shade700,
+                                      onChanged: (val) {
+                                        setDialogState(() => _showContenedores = val ?? true);
+                                        setState(() {});
+                                      },
+                                    ),
+                                    CheckboxListTile(
+                                      title: const Text("Equipos en General"),
+                                      value: _showEquipos,
+                                      activeColor: Colors.blue.shade700,
+                                      onChanged: (val) {
+                                        setDialogState(() => _showEquipos = val ?? true);
+                                        setState(() {});
+                                      },
+                                    ),
+                                    const Divider(),
+                                    CheckboxListTile(
+                                      title: const Text("Tractos (Camiones)"),
+                                      value: _showCamion,
+                                      onChanged: (val) {
+                                        setDialogState(() => _showCamion = val ?? true);
+                                        setState(() {});
+                                      },
+                                    ),
+                                    CheckboxListTile(
+                                      title: const Text("Chasis A"),
+                                      value: _showChasisA,
+                                      onChanged: (val) {
+                                        setDialogState(() => _showChasisA = val ?? true);
+                                        setState(() {});
+                                      },
+                                    ),
+                                    CheckboxListTile(
+                                      title: const Text("Chasis B"),
+                                      value: _showChasisB,
+                                      onChanged: (val) {
+                                        setDialogState(() => _showChasisB = val ?? true);
+                                        setState(() {});
+                                      },
+                                    ),
+                                    CheckboxListTile(
+                                      title: const Text("Trazar Ruta de Viaje"),
+                                      value: _showRoute,
+                                      onChanged: (val) {
+                                        setDialogState(() => _showRoute = val ?? true);
+                                        setState(() {});
+                                      },
+                                    ),
+                                  ],
+                                );
+                              }
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text("Aceptar"),
+                              )
+                            ],
+                          ),
+                        );
+                      },
+                child: const Icon(Icons.tune),
+              ),
+              const SizedBox(height: 8),
+              FloatingActionButton.small(
+                heroTag: "mapSearchUnitBtn",
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.blue.shade700,
+                onPressed: () {
+                  _showUnitSelectionDialog();
+                },
+                child: const Icon(Icons.search),
+              ),
+            ],
           ),
         ),
 
@@ -1824,11 +2414,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                         ),
                       ],
                     ),
-                    const Divider(height: 8),
-                    _detailRow("Marca/Modelo", _selectedGpsItem!["marca"] ?? "N/A"),
-                    _detailRow("Placas", _selectedGpsItem!["placas"] ?? "N/A"),
-                    _detailRow("Velocidad", "${_selectedGpsItem!["speed"] ?? _selectedGpsItem!["velocidad"] ?? '0'} km/h"),
-                    _detailRow("Estado", _selectedGpsItem!["estatus"] ?? "EN MOVIMIENTO"),
+                    const SizedBox(height: 4),
                     if (_selectedGpsItem!["id_contenedor"] != null || _selectedGpsItem!["contenedor_id"] != null || (_selectedGpsItem!["id"] != null && _selectedGpsItem!["tipo_item"] == 'contenedor')) ...[
                       const SizedBox(height: 8),
                       Row(
@@ -1891,9 +2477,9 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: filteredItems.length,
+              itemCount: visibleCards.length,
               itemBuilder: (context, index) {
-                final item = filteredItems[index];
+                final item = visibleCards[index];
                 final double? lat = double.tryParse(item["lat"]?.toString() ?? item["latitud"]?.toString() ?? "");
                 final double? lng = double.tryParse(item["lng"]?.toString() ?? item["longitud"]?.toString() ?? "");
                 final bool hasCoords = lat != null && lng != null && lat != 0 && lng != 0;
@@ -1920,6 +2506,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                       _selectedGpsItem = item;
                     });
                     if (hasCoords) {
+                      _googleMapController?.animateCamera(gmaps.CameraUpdate.newLatLngZoom(gmaps.LatLng(lat, lng), 15));
                       _mapController.move(LatLng(lat, lng), 15);
                       
                       _fetchDestinationAndRoute(item, LatLng(lat, lng));
@@ -2061,7 +2648,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       if (widget.module == 'monitoreo' && _filtersApplied && !isLoading) {
-        fetchData();
+        fetchData(isSilent: true);
       }
     });
   }
@@ -2365,6 +2952,89 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                 ),
               ),
             ),
+          if (widget.module == 'planeacion')
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              width: double.infinity,
+              color: Colors.blue.shade50,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _planeacionFechaInicio ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            _planeacionFechaInicio = picked;
+                          });
+                          fetchData();
+                        }
+                      },
+                      child: Row(
+                        children: [
+                          Icon(Icons.date_range, color: Colors.blue.shade800, size: 16),
+                          const SizedBox(width: 6),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("Desde", style: TextStyle(fontSize: 10, color: Colors.blueGrey)),
+                              Text(
+                                _planeacionFechaInicio == null
+                                    ? "Seleccionar"
+                                    : "${_planeacionFechaInicio!.year}-${_planeacionFechaInicio!.month.toString().padLeft(2, '0')}-${_planeacionFechaInicio!.day.toString().padLeft(2, '0')}",
+                                style: TextStyle(color: Colors.blue.shade900, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _planeacionFechaFin ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            _planeacionFechaFin = picked;
+                          });
+                          fetchData();
+                        }
+                      },
+                      child: Row(
+                        children: [
+                          Icon(Icons.date_range, color: Colors.blue.shade800, size: 16),
+                          const SizedBox(width: 6),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("Hasta", style: TextStyle(fontSize: 10, color: Colors.blueGrey)),
+                              Text(
+                                _planeacionFechaFin == null
+                                    ? "Seleccionar"
+                                    : "${_planeacionFechaFin!.year}-${_planeacionFechaFin!.month.toString().padLeft(2, '0')}-${_planeacionFechaFin!.day.toString().padLeft(2, '0')}",
+                                style: TextStyle(color: Colors.blue.shade900, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -2390,17 +3060,19 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                             onRefresh: fetchData,
                             child: widget.module == 'operaciones'
                                 ? _buildGroupedOperacionesList(filteredItems)
-                                : ListView.builder(
-                                    padding: const EdgeInsets.all(12),
-                                    itemCount: filteredItems.length,
-                                    itemBuilder: (context, index) {
-                                      final Map<String, dynamic> row = Map<String, dynamic>.from(filteredItems[index]);
-                                      return Card(
-                                        margin: const EdgeInsets.only(bottom: 12),
-                                        elevation: 2,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
+                                : widget.module == 'planeacion'
+                                    ? _buildPlaneacionList(filteredItems)
+                                    : ListView.builder(
+                                        padding: const EdgeInsets.all(12),
+                                        itemCount: filteredItems.length,
+                                        itemBuilder: (context, index) {
+                                          final Map<String, dynamic> row = Map<String, dynamic>.from(filteredItems[index]);
+                                          return Card(
+                                            margin: const EdgeInsets.only(bottom: 12),
+                                            elevation: 2,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
                                         child: Padding(
                                           padding: const EdgeInsets.all(16),
                                           child: Column(
@@ -2527,7 +3199,6 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
               value,
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 4),
             Text(
               label,
               textAlign: TextAlign.center,
@@ -2536,6 +3207,171 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildPlaneacionList(List<dynamic> list) {
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: list.length,
+      itemBuilder: (context, index) {
+        final item = Map<String, dynamic>.from(list[index]);
+        final String numContenedor = item["contenedor"]?.toString() ?? "S/N";
+        final String fechaInicio = item["fecha_inicio"]?.toString() ?? "N/A";
+        final String fechaFin = item["fecha_fin"]?.toString() ?? "N/A";
+        final String operador = item["operador"]?.toString() ?? "N/A";
+        final String proveedor = item["proveedor"]?.toString() ?? "N/A";
+        final String transportista = item["transportista"]?.toString() ?? proveedor ?? "N/A";
+        final String origen = item["origen"]?.toString() ?? "N/A";
+        final String destino = item["destino"]?.toString() ?? "N/A";
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          elevation: 3,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "Contenedor: $numContenedor",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.blueGrey,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.purple, width: 1),
+                      ),
+                      child: const Text(
+                        "Planeada",
+                        style: TextStyle(
+                          color: Colors.purple,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(height: 20),
+                _buildPlaneacionInfoRow(Icons.route, "Ruta", "$origen ➔ $destino"),
+                const SizedBox(height: 6),
+                _buildPlaneacionInfoRow(Icons.calendar_month, "Fechas", "Inicio: $fechaInicio\nFin: $fechaFin"),
+                const SizedBox(height: 6),
+                _buildPlaneacionInfoRow(Icons.person, "Operador", operador),
+                const SizedBox(height: 6),
+                _buildPlaneacionInfoRow(Icons.business, "Proveedor", proveedor),
+                const SizedBox(height: 6),
+                _buildPlaneacionInfoRow(Icons.local_shipping, "Transportista", transportista),
+                const Divider(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (_canFinalize) ...[
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          final int? cId = int.tryParse(item["contenedor_id"]?.toString() ?? "");
+                          if (cId != null) {
+                            _finalizarViaje(cId);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("ID de contenedor no disponible")),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.check, size: 14),
+                        label: const Text("Finalizar"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    if (_canAnular) ...[
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          final int? cId = int.tryParse(item["contenedor_id"]?.toString() ?? "");
+                          if (cId != null) {
+                            _anularPlaneacion(cId);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("ID de contenedor no disponible")),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.undo, size: 14),
+                        label: const Text("Deshacer"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    ElevatedButton.icon(
+                      onPressed: () => _showWebStyleInfoViajeModal(item),
+                      icon: const Icon(Icons.info_outline, size: 14),
+                      label: const Text("Ver más info"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade800,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPlaneacionInfoRow(IconData icon, String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: Colors.grey.shade600),
+        const SizedBox(width: 8),
+        Text(
+          "$label: ",
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+      ],
     );
   }
 }

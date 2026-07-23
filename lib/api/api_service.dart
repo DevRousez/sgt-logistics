@@ -25,10 +25,10 @@ class ApiService {
     }
   }
 
-  static Future<void> saveUserData(Map<String, dynamic> data) async {
+  static Future<void> saveUserData(Map<dynamic, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
     print("ApiService: Saving user data: $data");
-    await prefs.setString('user_data', jsonEncode(data));
+    await prefs.setString('user_data', jsonEncode(Map<String, dynamic>.from(data)));
   }
 
   static Future<Map<String, dynamic>?> getUserData() async {
@@ -75,7 +75,7 @@ class ApiService {
       final response = await http.get(
         Uri.parse(url),
         headers: _headers(),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
 
       print("=== ApiService GET Response ===");
       print("Status Code: ${response.statusCode}");
@@ -110,7 +110,7 @@ class ApiService {
         Uri.parse(url),
         headers: _headers(),
         body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
 
       print("=== ApiService POST Response ===");
       print("Status Code: ${response.statusCode}");
