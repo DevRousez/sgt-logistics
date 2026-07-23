@@ -3279,6 +3279,42 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                 const SizedBox(height: 6),
                 _buildPlaneacionInfoRow(Icons.local_shipping, "Transportista", transportista),
                 const Divider(height: 20),
+                const Text(
+                  "Documentación del Viaje:",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blueGrey),
+                ),
+                const SizedBox(height: 6),
+                _docCheckRow(
+                  "Carta Porte PDF",
+                  item["carta_porte"],
+                  filename: item["carta_porte"]?.toString(),
+                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
+                ),
+                _docCheckRow(
+                  "Carta Porte XML",
+                  item["carta_porte_xml"],
+                  filename: item["carta_porte_xml"]?.toString(),
+                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
+                ),
+                _docCheckRow(
+                  "Documento DODA",
+                  item["doda"],
+                  filename: item["doda"]?.toString(),
+                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
+                ),
+                _docCheckRow(
+                  "Boleta de Liberación",
+                  item["boleta_liberacion"],
+                  filename: item["boleta_liberacion"]?.toString(),
+                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
+                ),
+                _docCheckRow(
+                  "Boleta de Vacío",
+                  item["boleta_vacio"],
+                  filename: item["boleta_vacio"]?.toString(),
+                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
+                ),
+                const Divider(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
