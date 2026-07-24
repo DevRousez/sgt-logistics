@@ -41,6 +41,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
   gmaps.GoogleMapController? _googleMapController;
   final fmap.MapController _mapController = fmap.MapController();
   Map<String, gmaps.BitmapDescriptor> _customMarkerIcons = {};
+  Map<String, LatLng> _previousCoordinates = {};
   Set<String> _selectedCardIds = {};
   Map<String, dynamic>? _selectedGpsItem;
   bool _showCamion = true;
@@ -109,24 +110,63 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     }
   }
 
-  Future<void> _finalizarViaje(int containerId) async {
-    final bool? confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Finalizar Viaje"),
-        content: const Text("¿Está seguro que desea finalizar este viaje?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text("Finalizar"),
-          ),
-        ],
-      ),
-    );
+  Future<void> _finalizarViaje(int containerId, {Map<String, dynamic>? item}) async {
+    List<String> missingDocs = [];
+    if (item != null) {
+      if (item["carta_porte"] == null || item["carta_porte"].toString().isEmpty) missingDocs.add("Carta Porte PDF");
+      if (item["carta_porte_xml"] == null || item["carta_porte_xml"].toString().isEmpty) missingDocs.add("Carta Porte XML");
+      if (item["doda"] == null || item["doda"].toString().isEmpty) missingDocs.add("Documento DODA");
+      if (item["boleta_liberacion"] == null || item["boleta_liberacion"].toString().isEmpty) missingDocs.add("Boleta de Liberación");
+      if (item["boleta_vacio"] == null || item["boleta_vacio"].toString().isEmpty) missingDocs.add("Boleta de Vacío");
+    }
 
-    if (confirm != true) return;
+    bool shouldProceed = false;
+
+    if (missingDocs.isNotEmpty) {
+      final bool? proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning, color: Colors.amber),
+              SizedBox(width: 10),
+              Text("Documentos Faltantes"),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Este viaje aún no cuenta con los siguientes documentos cargados:"),
+              const SizedBox(height: 10),
+              ...missingDocs.map((doc) => Text("• $doc", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange))),
+              const SizedBox(height: 15),
+
+            ],
+          ),
+         ),
+      );
+      shouldProceed = proceed == true;
+    } else {
+      final bool? confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Finalizar Viaje"),
+          content: const Text("¿Está seguro que desea finalizar este viaje?"),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text("Finalizar"),
+            ),
+          ],
+        ),
+      );
+      shouldProceed = confirm == true;
+    }
+
+    if (!shouldProceed) return;
 
     setState(() {
       isLoading = true;
@@ -1890,11 +1930,24 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
           
       if (!_selectedCardIds.contains(itemKey)) continue;
 
-      final isStopped = (item["velocidad"]?.toString() == "0" || 
-                         item["speed"]?.toString() == "0" || 
-                         (item["estatus"]?.toString().toLowerCase().contains("detenido") ?? false));
-
       final String markerKey = "${item['tipo_item']}_${item['id'] ?? item['contenedor']}_$tipo";
+
+      bool isMovingByCoords = false;
+      if (_previousCoordinates.containsKey(markerKey)) {
+        final prev = _previousCoordinates[markerKey]!;
+        if (prev.latitude != lat || prev.longitude != lng) {
+          isMovingByCoords = true;
+        }
+      }
+      _previousCoordinates[markerKey] = LatLng(lat, lng);
+
+      bool isStopped = (item["velocidad"]?.toString() == "0" || 
+                        item["speed"]?.toString() == "0" || 
+                        (item["estatus"]?.toString().toLowerCase().contains("detenido") ?? false));
+      if (isMovingByCoords) {
+        isStopped = false;
+      }
+
       final Color markerColor = isStopped ? Colors.orange.shade800 : Colors.green.shade600;
       
       String typeLetter = "T";
@@ -1913,9 +1966,11 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
       final String formattedSubTitle = "$subTitleLabel${idEquipo.isNotEmpty ? ' - $idEquipo' : ''}";
       
       final String containerNum = item["contenedor"]?.toString() ?? item["num_contenedor"]?.toString() ?? _getItemName(item);
-      _loadCustomMarkerIcon(markerKey, markerColor, containerNum, formattedSubTitle, typeLetter, isStopped);
       
-      final gmaps.BitmapDescriptor icon = _customMarkerIcons[markerKey] ?? gmaps.BitmapDescriptor.defaultMarkerWithHue(
+      final String cacheKey = "${markerKey}_$isStopped";
+      _loadCustomMarkerIcon(cacheKey, markerColor, containerNum, formattedSubTitle, typeLetter, isStopped);
+      
+      final gmaps.BitmapDescriptor icon = _customMarkerIcons[cacheKey] ?? gmaps.BitmapDescriptor.defaultMarkerWithHue(
         isStopped ? gmaps.BitmapDescriptor.hueOrange : gmaps.BitmapDescriptor.hueGreen
       );
 
@@ -3323,7 +3378,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                         onPressed: () {
                           final int? cId = int.tryParse(item["contenedor_id"]?.toString() ?? "");
                           if (cId != null) {
-                            _finalizarViaje(cId);
+                             _finalizarViaje(cId, item: item);
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text("ID de contenedor no disponible")),

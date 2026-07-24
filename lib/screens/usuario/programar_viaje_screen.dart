@@ -168,7 +168,7 @@ class _ProgramarViajeScreenState extends State<ProgramarViajeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Programar Viaje"),
+        title: const Text("Programar Viaje( Elemental )"),
       ),
       body: _isLoadingCatalogs
           ? const Center(child: CircularProgressIndicator())

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'usuario_module_screen.dart';
 import 'programar_viaje_screen.dart';
+import 'bancos_screen.dart';
+import 'reportes_list_screen.dart';
 import '../home_screen.dart';
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
@@ -21,11 +23,37 @@ class _SgtDashboardScreenState extends State<SgtDashboardScreen> {
   List<Map<String, dynamic>> _empresasPropias = [];
   bool _hasMultiempresa = false;
   bool _hasPlaneacionList = false;
+  Map<String, dynamic> _reportStats = {};
+  bool _loadingStats = false;
 
   @override
   void initState() {
     super.initState();
     _loadUserInfo();
+  }
+
+  Future<void> _fetchStats() async {
+    if (_selectedEmpresaId == null) return;
+    setState(() {
+      _loadingStats = true;
+    });
+    try {
+      final response = await ApiService.get(ApiEndpoints.reportes);
+      if (response.statusCode == 200) {
+        final resData = jsonDecode(response.body);
+        if (resData["success"] == true && resData["data"] != null) {
+          setState(() {
+            _reportStats = Map<String, dynamic>.from(resData["data"]);
+          });
+        }
+      }
+    } catch (e) {
+      // Ignorar error
+    } finally {
+      setState(() {
+        _loadingStats = false;
+      });
+    }
   }
 
   Future<void> _loadUserInfo() async {
@@ -62,6 +90,7 @@ class _SgtDashboardScreenState extends State<SgtDashboardScreen> {
       });
 
       await _fetchEmpresasPropias();
+      await _fetchStats();
     }
   }
 
@@ -113,6 +142,8 @@ class _SgtDashboardScreenState extends State<SgtDashboardScreen> {
       _selectedEmpresaId = id;
       _selectedEmpresaNombre = nombre;
     });
+    
+    await _fetchStats();
     
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -258,6 +289,23 @@ class _SgtDashboardScreenState extends State<SgtDashboardScreen> {
       );
     }
 
+    // Bancos
+    gridCards.add(
+      _card(
+        context,
+        title: "Bancos",
+        icon: Icons.account_balance,
+        color: Colors.teal.shade800,
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const BancosScreen()),
+          );
+        },
+        subtitle: "Cuentas y saldos",
+      ),
+    );
+
     // Reportes
     gridCards.add(
       _card(
@@ -265,8 +313,13 @@ class _SgtDashboardScreenState extends State<SgtDashboardScreen> {
         title: "Reportes",
         icon: Icons.bar_chart,
         color: Colors.teal,
-        onTap: () => _goTo(context, "reportes", "Reportes y Estadísticas"),
-        subtitle: "Estadísticas",
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ReportesListScreen()),
+          );
+        },
+        subtitle: "Generación de reportes",
       ),
     );
 
@@ -299,11 +352,20 @@ class _SgtDashboardScreenState extends State<SgtDashboardScreen> {
         ),
         body: Padding(
           padding: const EdgeInsets.all(12),
-          child: GridView.count(
-            crossAxisCount: 2,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            children: gridCards,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildExpandableStats(),
+              const SizedBox(height: 12),
+              Expanded(
+                child: GridView.count(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  children: gridCards,
+                ),
+              ),
+            ],
           ),
         ),
         bottomNavigationBar: _userName == null
@@ -394,6 +456,94 @@ class _SgtDashboardScreenState extends State<SgtDashboardScreen> {
                 fontSize: 12,
                 color: Colors.grey.shade600,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  Widget _buildExpandableStats() {
+    if (_reportStats.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    
+    final totalCotizaciones = _reportStats['total_cotizaciones']?.toString() ?? '0';
+    final totalViajesActivos = _reportStats['total_viajes_activos']?.toString() ?? '0';
+    final totalContenedores = _reportStats['total_contenedores']?.toString() ?? '0';
+    final cotizacionesAprobadas = _reportStats['cotizaciones_aprobadas']?.toString() ?? '0';
+    final cotizacionesPendientes = _reportStats['cotizaciones_pendientes']?.toString() ?? '0';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          title: const Text(
+            "Estadísticas Operativas",
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 14),
+          ),
+          leading: const Icon(Icons.analytics, color: Colors.blueGrey, size: 20),
+          children: [
+            SizedBox(
+              height: 100,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                children: [
+                  _buildMiniStatCard("Cotizaciones", totalCotizaciones, Icons.receipt_long, Colors.blue),
+                  _buildMiniStatCard("Viajes Activos", totalViajesActivos, Icons.local_shipping, Colors.green),
+                  _buildMiniStatCard("Contenedores", totalContenedores, Icons.inventory_2, Colors.orange),
+                  _buildMiniStatCard("Aprobadas", cotizacionesAprobadas, Icons.check_circle, Colors.teal),
+                  _buildMiniStatCard("Pendientes", cotizacionesPendientes, Icons.hourglass_empty, Colors.amber),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMiniStatCard(String label, String value, IconData icon, Color color) {
+    return Card(
+      elevation: 1,
+      margin: const EdgeInsets.only(right: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Container(
+        width: 130,
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 10),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ],
         ),
