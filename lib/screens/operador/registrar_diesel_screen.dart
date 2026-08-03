@@ -5,8 +5,13 @@ import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
+import '../../utils/file_downloader.dart';
 
 class RegistrarDieselScreen extends StatefulWidget {
   const RegistrarDieselScreen({super.key});
@@ -23,11 +28,53 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
   final TextEditingController _litrosUreaController = TextEditingController();
   final TextEditingController _costoUreaController = TextEditingController();
   
-  File? _ticketImage;
-  File? _ureaImage;
+  XFile? _ticketImage;
+  XFile? _ureaImage;
   final ImagePicker _picker = ImagePicker();
   
   bool _isLoading = false;
+
+  Future<void> _descargarYVerArchivo(BuildContext context, String url, String fileName) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Descargando $fileName..."),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$fileName');
+        await file.writeAsBytes(response.bodyBytes);
+
+        await OpenFilex.open(file.path);
+      } else {
+        throw Exception("Status code: ${response.statusCode}");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No se pudo abrir localmente. Abriendo en navegador..."),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      try {
+        final Uri uri = Uri.parse(url);
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (err) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Error al abrir enlace: $err"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
   String? _gpsCoordinates;
   double? _latitude;
   double? _longitude;
@@ -188,9 +235,9 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
       if (pickedFile != null) {
         setState(() {
           if (target == 'diesel') {
-            _ticketImage = File(pickedFile.path);
+            _ticketImage = pickedFile;
           } else {
-            _ureaImage = File(pickedFile.path);
+            _ureaImage = pickedFile;
           }
         });
       }
@@ -531,22 +578,57 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              _dieselDatos!['comprobante'],
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              errorBuilder: (c, o, s) => Container(
-                                height: 100,
-                                color: Colors.grey.shade200,
-                                child: const Center(
-                                  child: Icon(Icons.broken_image, color: Colors.grey),
-                                ),
-                              ),
-                            ),
-                          ),
+                           Stack(
+                             children: [
+                               InkWell(
+                                 onTap: () {
+                                   _descargarYVerArchivo(
+                                     context,
+                                     _dieselDatos!['comprobante'],
+                                     "ticket_diesel_${_idAsignacion ?? 'registro'}.jpg",
+                                   );
+                                 },
+                                 child: ClipRRect(
+                                   borderRadius: BorderRadius.circular(8),
+                                   child: Image.network(
+                                     _dieselDatos!['comprobante'],
+                                     height: 200,
+                                     width: double.infinity,
+                                     fit: BoxFit.cover,
+                                     errorBuilder: (c, o, s) => Container(
+                                       height: 100,
+                                       color: Colors.grey.shade200,
+                                       child: const Center(
+                                         child: Icon(Icons.broken_image, color: Colors.grey),
+                                       ),
+                                     ),
+                                   ),
+                                 ),
+                               ),
+                               Positioned(
+                                 right: 8,
+                                 bottom: 8,
+                                 child: Container(
+                                   decoration: BoxDecoration(
+                                     color: Colors.black.withOpacity(0.6),
+                                     shape: BoxShape.circle,
+                                   ),
+                                   child: IconButton(
+                                     constraints: const BoxConstraints(),
+                                     padding: const EdgeInsets.all(6),
+                                     icon: const Icon(Icons.download, color: Colors.white, size: 20),
+                                     onPressed: () {
+                                       FileDownloader.downloadFile(
+                                         context: context,
+                                         url: _dieselDatos!['comprobante'],
+                                         fileName: "ticket_diesel_${_idAsignacion ?? 'registro'}.jpg",
+                                       );
+                                     },
+                                   ),
+                                 ),
+                               ),
+                             ],
+                           ),
                         ],
                         if (_dieselDatos!['litros_urea'] != null || _dieselDatos!['costo_urea'] != null) ...[
                           const Divider(height: 30),
@@ -588,21 +670,56 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                               ),
                             ),
                             const SizedBox(height: 10),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                _dieselDatos!['comprobante_urea'],
-                                height: 180,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
-                                errorBuilder: (c, o, s) => Container(
-                                  height: 100,
-                                  color: Colors.grey.shade200,
-                                  child: const Center(
-                                    child: Icon(Icons.broken_image, color: Colors.grey),
+                            Stack(
+                              children: [
+                                InkWell(
+                                  onTap: () {
+                                    _descargarYVerArchivo(
+                                      context,
+                                      _dieselDatos!['comprobante_urea'],
+                                      "ticket_urea_${_idAsignacion ?? 'registro'}.jpg",
+                                    );
+                                  },
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.network(
+                                      _dieselDatos!['comprobante_urea'],
+                                      height: 180,
+                                      width: double.infinity,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (c, o, s) => Container(
+                                        height: 100,
+                                        color: Colors.grey.shade200,
+                                        child: const Center(
+                                          child: Icon(Icons.broken_image, color: Colors.grey),
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
+                                Positioned(
+                                  right: 8,
+                                  bottom: 8,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withOpacity(0.6),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: IconButton(
+                                      constraints: const BoxConstraints(),
+                                      padding: const EdgeInsets.all(6),
+                                      icon: const Icon(Icons.download, color: Colors.white, size: 20),
+                                      onPressed: () {
+                                        FileDownloader.downloadFile(
+                                          context: context,
+                                          url: _dieselDatos!['comprobante_urea'],
+                                          fileName: "ticket_urea_${_idAsignacion ?? 'registro'}.jpg",
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ],
@@ -724,12 +841,19 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        _ticketImage!,
-                        height: 200,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                      ),
+                      child: kIsWeb
+                          ? Image.network(
+                              _ticketImage!.path,
+                              height: 200,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            )
+                          : Image.file(
+                              File(_ticketImage!.path),
+                              height: 200,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
                     ),
                     Positioned(
                       right: 8,
@@ -806,12 +930,19 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        _ureaImage!,
-                        height: 200,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                      ),
+                      child: kIsWeb
+                          ? Image.network(
+                              _ureaImage!.path,
+                              height: 200,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            )
+                          : Image.file(
+                              File(_ureaImage!.path),
+                              height: 200,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
                     ),
                     Positioned(
                       right: 8,

@@ -80,26 +80,30 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        mini: true,
-        backgroundColor: Colors.white.withOpacity(0.2),
-        foregroundColor: Colors.white,
-        onPressed: () => _showSettingsDialog(context),
-        child: const Icon(Icons.settings),
-      ),
+      floatingActionButton: ApiConfig.isProduction
+          ? null
+          : FloatingActionButton(
+              mini: true,
+              backgroundColor: Colors.white.withOpacity(0.2),
+              foregroundColor: Colors.white,
+              onPressed: () => _showSettingsDialog(context),
+              child: const Icon(Icons.settings),
+            ),
       body: Container(
         width: double.infinity,
         height: double.infinity,
         decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage(
-              'assets/img/sgtprincipal.png',
-            ),
-            fit: BoxFit.cover,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF6BA4C9), // Azul cielo suave
+              Color(0xFF0F2027), // Azul marino profundo
+            ],
           ),
         ),
         child: Container(
-          color: Colors.black54,
+          color: Colors.transparent,
           child: Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(

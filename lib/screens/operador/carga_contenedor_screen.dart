@@ -5,8 +5,14 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
+import '/config/api_config.dart';
+import '../../utils/file_downloader.dart';
 
 class CargaContenedorScreen extends StatefulWidget {
   const CargaContenedorScreen({super.key});
@@ -16,9 +22,63 @@ class CargaContenedorScreen extends StatefulWidget {
 }
 
 class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
-  final List<File> _photos = [];
+  final List<XFile> _photos = [];
   final ImagePicker _picker = ImagePicker();
   bool _isLoading = false;
+
+  String _buildImageUrl(String path) {
+    if (path.isEmpty) return "";
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+    final cleanBaseUrl = ApiConfig.baseUrl.replaceAll('/api', '');
+    if (path.contains('uploads/')) {
+      return "$cleanBaseUrl/$path";
+    }
+    return "$cleanBaseUrl/uploads/carga_contenedor/$_idAsignacion/$path";
+  }
+
+  Future<void> _descargarYVerArchivo(BuildContext context, String url, String fileName) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Descargando $fileName..."),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$fileName');
+        await file.writeAsBytes(response.bodyBytes);
+
+        await OpenFilex.open(file.path);
+      } else {
+        throw Exception("Status code: ${response.statusCode}");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No se pudo abrir localmente. Abriendo en navegador..."),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      try {
+        final Uri uri = Uri.parse(url);
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (err) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Error al abrir enlace: $err"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
   
   bool _yaRegistrado = false;
   bool _validandoEstatus = true;
@@ -82,9 +142,29 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
           final data = resData["data"];
           final bool reg = data["viaje_iniciado"] == true;
           await prefs.setBool(localKey, reg);
+          
+          List<String> parsedFotos = [];
+          if (reg) {
+            final dynamic rawFotos = data["fotos"] ?? data["fotos_inicio"] ?? data["fotos_contenedor"] ?? data["evidencias"];
+            if (rawFotos is List) {
+              parsedFotos = List<String>.from(rawFotos.map((e) => e.toString()));
+            } else if (rawFotos is String && rawFotos.isNotEmpty) {
+              try {
+                final decoded = jsonDecode(rawFotos);
+                if (decoded is List) {
+                  parsedFotos = List<String>.from(decoded.map((e) => e.toString()));
+                } else {
+                  parsedFotos = [rawFotos];
+                }
+              } catch (_) {
+                parsedFotos = [rawFotos];
+              }
+            }
+          }
+          
           setState(() {
             _yaRegistrado = reg;
-            _fotosGuardadas = reg ? List<String>.from(data["fotos"] ?? []) : [];
+            _fotosGuardadas = parsedFotos;
           });
         }
       } else {
@@ -132,7 +212,7 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
       );
       if (pickedFile != null) {
         setState(() {
-          _photos.add(File(pickedFile.path));
+          _photos.add(pickedFile);
         });
       }
     } catch (e) {
@@ -426,12 +506,27 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
                       ),
                       if (_fotosGuardadas.isNotEmpty) ...[
                         const Divider(height: 30),
-                        const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            "Fotos Registradas:",
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              "Fotos Registradas:",
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                            if (_fotosGuardadas.length > 1)
+                              TextButton.icon(
+                                icon: const Icon(Icons.download_for_offline, size: 18),
+                                label: const Text("Descargar todas", style: TextStyle(fontSize: 12)),
+                                onPressed: () {
+                                  final List<String> urls = _fotosGuardadas.map((url) => _buildImageUrl(url)).toList();
+                                  FileDownloader.downloadAllFiles(
+                                    context: context,
+                                    urls: urls,
+                                    prefix: "carga_contenedor_${_idAsignacion ?? 'viaje'}",
+                                  );
+                                },
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 10),
                         GridView.builder(
@@ -444,16 +539,59 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
                             mainAxisSpacing: 8,
                           ),
                           itemBuilder: (context, index) {
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                _fotosGuardadas[index],
-                                fit: BoxFit.cover,
-                                errorBuilder: (c, o, s) => Container(
-                                  color: Colors.grey.shade300,
-                                  child: const Icon(Icons.broken_image, color: Colors.grey),
+                            final rawUrl = _fotosGuardadas[index];
+                            final imageUrl = _buildImageUrl(rawUrl);
+                            return Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: InkWell(
+                                    onTap: () {
+                                      if (imageUrl.isNotEmpty) {
+                                        _descargarYVerArchivo(
+                                          context,
+                                          imageUrl,
+                                          "carga_contenedor_${index + 1}.jpg",
+                                        );
+                                      }
+                                    },
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(
+                                        imageUrl,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (c, o, s) => Container(
+                                          color: Colors.grey.shade300,
+                                          child: const Icon(Icons.broken_image, color: Colors.grey),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                Positioned(
+                                  right: 2,
+                                  bottom: 2,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withOpacity(0.6),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: IconButton(
+                                      constraints: const BoxConstraints(),
+                                      padding: const EdgeInsets.all(4),
+                                      icon: const Icon(Icons.download, color: Colors.white, size: 18),
+                                      onPressed: () {
+                                        if (imageUrl.isNotEmpty) {
+                                          FileDownloader.downloadFile(
+                                            context: context,
+                                            url: imageUrl,
+                                            fileName: "carga_contenedor_${index + 1}.jpg",
+                                          );
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
                             );
                           },
                         ),
@@ -523,7 +661,9 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
                         Positioned.fill(
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.file(_photos[index], fit: BoxFit.cover),
+                            child: kIsWeb
+                                ? Image.network(_photos[index].path, fit: BoxFit.cover)
+                                : Image.file(File(_photos[index].path), fit: BoxFit.cover),
                           ),
                         ),
                         Positioned(
