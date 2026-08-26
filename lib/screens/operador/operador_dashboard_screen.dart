@@ -7,8 +7,11 @@ import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'registrar_diesel_screen.dart';
+import 'dart:async';
 import 'carga_contenedor_screen.dart';
 import 'finalizar_viaje_screen.dart';
+import 'historial_viajes_screen.dart';
+import 'gastos_viaje_screen.dart';
 import '../home_screen.dart';
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
@@ -27,6 +30,8 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
   String? _unidad;
   String? _idEquipo;
   int? _idAsignacion;
+  Timer? _pollingTimer;
+  bool _isDialogOpen = false;
 
   List<Map<String, dynamic>> _documentos = [];
   bool _loadingDocs = false;
@@ -34,7 +39,32 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _loadOperatorData();
+    _loadOperatorData().then((_) {
+      _checkPendingAssignment();
+    });
+    // Configurar el sondeo automático cada 30 segundos
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (!_isDialogOpen) {
+        _checkPendingAssignment();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _manualRefresh() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Actualizando información..."),
+        duration: Duration(seconds: 1),
+      ),
+    );
+    await _loadOperatorData();
+    await _checkPendingAssignment();
   }
 
   Future<void> _loadOperatorData() async {
@@ -46,6 +76,119 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
         _idEquipo = data["id_equipo"]?.toString() ?? "N/A";
         _idAsignacion = int.tryParse(data["id_asignacion"]?.toString() ?? "");
       });
+    }
+  }
+
+  Future<void> _checkPendingAssignment() async {
+    try {
+      final response = await ApiService.get(ApiEndpoints.checkAsignacion);
+      if (response.statusCode == 200) {
+        final resData = jsonDecode(response.body);
+        if (resData["success"] == true && resData["data"] != null) {
+          final assignment = resData["data"];
+          final int? idAsig = int.tryParse(assignment["id_asignacion"]?.toString() ?? "");
+          final String empresaNombre = assignment["nombre_empresa"]?.toString() ?? "Nueva Empresa";
+          final String viajeOrigenDestino = assignment["origen_destino"]?.toString() ?? "";
+          final String numContenedor = assignment["num_contenedor"]?.toString() ?? "N/A";
+          final String camionUnidad = assignment["camion"]?.toString() ?? "N/A";
+
+          if (idAsig != null && mounted && !_isDialogOpen) {
+            _showAssignmentDialog(idAsig, empresaNombre, viajeOrigenDestino, numContenedor, camionUnidad);
+          }
+        }
+      }
+    } catch (e) {
+      print("Error checking pending assignment: $e");
+    }
+  }
+
+  void _showAssignmentDialog(int idAsignacion, String empresaNombre, String detallesViaje, String numContenedor, String camionUnidad) {
+    setState(() {
+      _isDialogOpen = true;
+    });
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.assignment, color: Colors.blue),
+              SizedBox(width: 10),
+              Text("Nueva Asignación"),
+            ],
+          ),
+          content: Text(
+            "Has sido asignado a la empresa: $empresaNombre.\n\n"
+            "Contenedor: $numContenedor\n"
+            "Unidad/Camión: $camionUnidad\n"
+            "Ruta: $detallesViaje\n\n"
+            "¿Aceptas esta asignación para comenzar a capturar datos?",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                setState(() {
+                  _isDialogOpen = false;
+                });
+              },
+              child: const Text("Rechazar"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                setState(() {
+                  _isDialogOpen = false;
+                });
+                await _aceptarAsignacion(idAsignacion);
+              },
+              child: const Text("Aceptar"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _aceptarAsignacion(int idAsignacion) async {
+    try {
+      final response = await ApiService.post(
+        ApiEndpoints.aceptarAsignacion,
+        {"id_asignacion": idAsignacion},
+      );
+      if (response.statusCode == 200) {
+        final resData = jsonDecode(response.body);
+        if (resData["success"] == true) {
+          if (resData["data"] != null) {
+            final currentData = await ApiService.getUserData() ?? {};
+            currentData.addAll(Map<String, dynamic>.from(resData["data"]));
+            await ApiService.saveUserData(currentData);
+            await _loadOperatorData();
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Asignación aceptada con éxito"),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } else {
+          throw Exception(resData["message"] ?? "Error al aceptar");
+        }
+      } else {
+        throw Exception("Status code: ${response.statusCode}");
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error al aceptar asignación: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -296,6 +439,11 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
           title: const Text('Panel Operador'),
           actions: [
             IconButton(
+              onPressed: _manualRefresh,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Actualizar',
+            ),
+            IconButton(
               onPressed: () async {
                 await ApiService.setToken('');
                 if (context.mounted) {
@@ -354,9 +502,29 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
               title: const Text('Documentos del Viaje'),
               onTap: _fetchAndShowDocuments,
             ),
-            const ListTile(
-              leading: Icon(Icons.history),
-              title: Text('Historial'),
+            ListTile(
+              leading: const Icon(Icons.receipt_long, color: Colors.orange),
+              title: const Text('Gastos de Viaje'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const GastosViajeScreen(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.history),
+              title: const Text('Historial'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const HistorialViajesScreen(),
+                  ),
+                );
+              },
             ),
           ],
         ),

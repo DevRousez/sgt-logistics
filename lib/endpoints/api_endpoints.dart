@@ -21,4 +21,11 @@ class ApiEndpoints {
   static String get estatusFlujo => "${ApiConfig.baseUrl}/operador/estatus-flujo";
   static String get guardarCoordenadas => "${ApiConfig.baseUrl}/operador/coordenadas";
   static String get finalizarViajeOperador => "${ApiConfig.baseUrl}/operador/finalizar-viaje";
+  static String get checkAsignacion => "${ApiConfig.baseUrl}/operador/check-asignacion";
+  static String get aceptarAsignacion => "${ApiConfig.baseUrl}/operador/aceptar-asignacion";
+  static String get historialOperador => "${ApiConfig.baseUrl}/operador/historial";
+  static String get viajesPendientesLiquidar => "${ApiConfig.baseUrl}/operador/viajes-pendientes-liquidar";
+  static String get registrarGastosViaje => "${ApiConfig.baseUrl}/operador/registrar-gastos-viaje";
+  static String get obtenerGastosViaje => "${ApiConfig.baseUrl}/operador/obtener-gastos-viaje";
+  static String get eliminarGastoViaje => "${ApiConfig.baseUrl}/operador/eliminar-gasto-viaje";
 }

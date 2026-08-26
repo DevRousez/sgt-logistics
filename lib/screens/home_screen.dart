@@ -102,98 +102,134 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
-        child: Container(
-          color: Colors.transparent,
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 30,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-
-                  Image.asset(
-                    'assets/img/sgtprincipal.png',
-                    height: 120,
-                  ),
-
-                  const SizedBox(height: 25),
-
-                  const Text(
-                    'MOBILE',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            child: Center(
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
                     ),
+                  ],
+                  image: const DecorationImage(
+                    image: AssetImage('assets/img/sgtprincipal.png'),
+                    fit: BoxFit.cover,
                   ),
-
-                  const SizedBox(height: 10),
-
-                  const Text(
-                    'Sistema de Gestión de Transporte',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    color: Colors.black.withOpacity(0.55),
                   ),
-
-                  const SizedBox(height: 50),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.local_shipping),
-                      label: const Text(
-                        'SOY OPERADOR',
+                  child: Stack(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Sistema de Gestión de Transporte',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            const Spacer(flex: 5),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 55,
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.local_shipping),
+                                label: const Text(
+                                  'SOY OPERADOR',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                      const OperadorLoginScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 15),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 55,
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.person),
+                                label: const Text(
+                                  'USUARIO SGT',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                      const UsuarioLoginScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            const Spacer(),
+                            const Text(
+                              'Versión 1.0',
+                              style: TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                            const OperadorLoginScreen(),
+                      const Align(
+                        alignment: Alignment(0.0, 0.04),
+                        child: Text(
+                          'MOBILE',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 4,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black87,
+                                blurRadius: 6,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
                           ),
-                        );
-                      },
-                    ),
-                  ),
-
-                  const SizedBox(height: 15),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.person),
-                      label: const Text(
-                        'USUARIO SGT',
+                        ),
                       ),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                            const UsuarioLoginScreen(),
-                          ),
-                        );
-                      },
-                    ),
+                    ],
                   ),
-
-                  const SizedBox(height: 40),
-
-                  const Text(
-                    'Versión 1.0',
-                    style: TextStyle(
-                      color: Colors.white54,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

@@ -332,7 +332,9 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.pop(context);
+          setState(() {
+            _yaRegistrado = true;
+          });
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -566,6 +568,43 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                               ),
                             ),
                           ],
+                        const SizedBox(height: 25),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.archive),
+                            label: const Text(
+                              "Cerrar y mover a historial",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade900,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: () async {
+                              final data = await ApiService.getUserData() ?? {};
+                              data["id_asignacion"] = null;
+                              data["num_contenedor"] = "N/A";
+                              data["unidad"] = "N/A";
+                              data["id_equipo"] = "N/A";
+                              await ApiService.saveUserData(data);
+
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text("Viaje archivado y asignación liberada."),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                                Navigator.pop(context);
+                              }
+                            },
+                          ),
+                        ),
                         ],
                       ),
                     ),

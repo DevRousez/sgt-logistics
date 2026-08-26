@@ -14,16 +14,14 @@ class OperadorLoginScreen extends StatefulWidget {
 }
 
 class _OperadorLoginScreenState extends State<OperadorLoginScreen> {
-  final TextEditingController nombreController = TextEditingController();
-  final TextEditingController telefonoController = TextEditingController();
+  final TextEditingController usuarioController = TextEditingController();
   final TextEditingController contrasenaController = TextEditingController();
   bool _obscureContrasena = true;
   bool _isLoading = false;
 
   @override
   void dispose() {
-    nombreController.dispose();
-    telefonoController.dispose();
+    usuarioController.dispose();
     contrasenaController.dispose();
     super.dispose();
   }
@@ -36,8 +34,7 @@ class _OperadorLoginScreenState extends State<OperadorLoginScreen> {
       final response = await ApiService.post(
         ApiEndpoints.validateOperador,
         {
-          "nombre": nombreController.text.trim(),
-          "telefono": telefonoController.text.trim(),
+          "usuario": usuarioController.text.trim(),
           "contrasena": contrasenaController.text.trim(),
         },
       );
@@ -62,7 +59,7 @@ class _OperadorLoginScreenState extends State<OperadorLoginScreen> {
       } else {
         final data = jsonDecode(response.body);
 
-        String message = data["message"] ??
+        String message = data["message"] ?? data["mensaje"] ??
             "No se encontró información con los datos proporcionados";
 
         if (data["errors"] != null && data["errors"] is Map) {
@@ -115,13 +112,8 @@ class _OperadorLoginScreenState extends State<OperadorLoginScreen> {
           children: [
 
             TextField(
-              controller: nombreController,
-              decoration: const InputDecoration(labelText: 'Nombre'),
-            ),
-
-            TextField(
-              controller: telefonoController,
-              decoration: const InputDecoration(labelText: 'Teléfono'),
+              controller: usuarioController,
+              decoration: const InputDecoration(labelText: 'Correo Electrónico'),
             ),
 
             TextField(

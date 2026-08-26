@@ -28,8 +28,8 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
   final TextEditingController _litrosUreaController = TextEditingController();
   final TextEditingController _costoUreaController = TextEditingController();
   
-  XFile? _ticketImage;
-  XFile? _ureaImage;
+  final List<XFile> _ticketImages = [];
+  final List<XFile> _ureaImages = [];
   final ImagePicker _picker = ImagePicker();
   
   bool _isLoading = false;
@@ -225,6 +225,17 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
   }
 
   Future<void> _pickImage(ImageSource source, String target) async {
+    final currentCount = target == 'diesel' ? _ticketImages.length : _ureaImages.length;
+    if (currentCount >= 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Límite alcanzado: Máximo 3 imágenes permitidas para ${target == 'diesel' ? 'diésel' : 'urea'}"),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     try {
       final pickedFile = await _picker.pickImage(
         source: source,
@@ -235,15 +246,70 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
       if (pickedFile != null) {
         setState(() {
           if (target == 'diesel') {
-            _ticketImage = pickedFile;
+            _ticketImages.add(pickedFile);
           } else {
-            _ureaImage = pickedFile;
+            _ureaImages.add(pickedFile);
           }
         });
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error al seleccionar imagen: $e")),
+      );
+    }
+  }
+
+  Future<void> _pickMultiImages(String target) async {
+    final currentCount = target == 'diesel' ? _ticketImages.length : _ureaImages.length;
+    if (currentCount >= 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Límite alcanzado: Máximo 3 imágenes permitidas para ${target == 'diesel' ? 'diésel' : 'urea'}"),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
+      );
+      if (pickedFiles.isNotEmpty) {
+        setState(() {
+          final spaceLeft = 3 - currentCount;
+          if (target == 'diesel') {
+            if (pickedFiles.length > spaceLeft) {
+              _ticketImages.addAll(pickedFiles.take(spaceLeft));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Solo se agregaron las primeras imágenes para no exceder el límite de 3"),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            } else {
+              _ticketImages.addAll(pickedFiles);
+            }
+          } else {
+            if (pickedFiles.length > spaceLeft) {
+              _ureaImages.addAll(pickedFiles.take(spaceLeft));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Solo se agregaron las primeras imágenes para no exceder el límite de 3"),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            } else {
+              _ureaImages.addAll(pickedFiles);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al seleccionar imágenes: $e")),
       );
     }
   }
@@ -267,7 +333,7 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
               title: const Text("Seleccionar de Galería"),
               onTap: () {
                 Navigator.pop(context);
-                _pickImage(ImageSource.gallery, target);
+                _pickMultiImages(target);
               },
             ),
           ],
@@ -276,10 +342,226 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
     );
   }
 
+  Widget _buildImageSelector({
+    required List<XFile> images,
+    required String target,
+    required String label,
+  }) {
+    final isDiesel = target == 'diesel';
+    final primaryColor = isDiesel ? Colors.blue.shade800 : Colors.blueGrey.shade800;
+    final showAddButton = images.length < 3;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isDiesel ? Colors.black87 : Colors.blueGrey),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 110,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: showAddButton ? images.length + 1 : images.length,
+            itemBuilder: (context, index) {
+              if (index == images.length) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0, top: 4.0, bottom: 4.0),
+                  child: InkWell(
+                    onTap: () => _showImageSourceBottomSheet(target),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: 100,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: primaryColor, width: 1.5),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.add_a_photo, color: primaryColor),
+                          const SizedBox(height: 4),
+                          Text(
+                            "Agregar",
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: primaryColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              final image = images[index];
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0, top: 4.0, bottom: 4.0),
+                child: Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: kIsWeb
+                          ? Image.network(
+                              image.path,
+                              width: 100,
+                              height: 100,
+                              fit: BoxFit.cover,
+                            )
+                          : Image.file(
+                              File(image.path),
+                              width: 100,
+                              height: 100,
+                              fit: BoxFit.cover,
+                            ),
+                    ),
+                    Positioned(
+                      right: 4,
+                      top: 4,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            images.removeAt(index);
+                          });
+                        },
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          padding: const EdgeInsets.all(4),
+                          child: const Icon(
+                            Icons.close,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildComprobanteList(dynamic data, String typeLabel, String filePrefix) {
+    if (data == null) return const SizedBox.shrink();
+    
+    List<String> urls = [];
+    if (data is List) {
+      urls = data.map((e) => e.toString()).toList();
+    } else if (data is String) {
+      final trimmed = data.trim();
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          final decoded = jsonDecode(trimmed);
+          if (decoded is List) {
+            urls = decoded.map((e) => e.toString()).toList();
+          }
+        } catch (_) {
+          urls = [data];
+        }
+      } else if (trimmed.contains(',')) {
+        urls = trimmed.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      } else {
+        urls = [data];
+      }
+    }
+    
+    if (urls.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 15),
+        Text(
+          typeLabel,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 150,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: urls.length,
+            itemBuilder: (context, index) {
+              final url = urls[index];
+              return Padding(
+                padding: const EdgeInsets.only(right: 12.0),
+                child: SizedBox(
+                  width: 150,
+                  child: Stack(
+                    children: [
+                      InkWell(
+                        onTap: () {
+                          _descargarYVerArchivo(
+                            context,
+                            url,
+                            "${filePrefix}_${index + 1}_${_idAsignacion ?? 'registro'}.jpg",
+                          );
+                        },
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            url,
+                            height: 150,
+                            width: 150,
+                            fit: BoxFit.cover,
+                            errorBuilder: (c, o, s) => Container(
+                              height: 150,
+                              width: 150,
+                              color: Colors.grey.shade200,
+                              child: const Center(
+                                child: Icon(Icons.broken_image, color: Colors.grey),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.6),
+                            shape: BoxShape.circle,
+                          ),
+                          child: IconButton(
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(6),
+                            icon: const Icon(Icons.download, color: Colors.white, size: 18),
+                            onPressed: () {
+                              FileDownloader.downloadFile(
+                                context: context,
+                                url: url,
+                                fileName: "${filePrefix}_${index + 1}_${_idAsignacion ?? 'registro'}.jpg",
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _guardarRegistro() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_ticketImage == null) {
+    if (_ticketImages.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Favor de capturar o tomar foto del ticket de diésel"),
@@ -293,22 +575,24 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
       _isLoading = true;
     });
 
-    String base64Image = "";
+    List<String> base64Images = [];
     try {
-      final bytes = await _ticketImage!.readAsBytes();
-      base64Image = base64Encode(bytes);
+      for (var img in _ticketImages) {
+        final bytes = await img.readAsBytes();
+        base64Images.add(base64Encode(bytes));
+      }
     } catch (e) {
       print("Error encoding image: $e");
     }
 
-    String base64UreaImage = "";
-    if (_ureaImage != null) {
-      try {
-        final bytes = await _ureaImage!.readAsBytes();
-        base64UreaImage = base64Encode(bytes);
-      } catch (e) {
-        print("Error encoding urea image: $e");
+    List<String> base64UreaImages = [];
+    try {
+      for (var img in _ureaImages) {
+        final bytes = await img.readAsBytes();
+        base64UreaImages.add(base64Encode(bytes));
       }
+    } catch (e) {
+      print("Error encoding urea image: $e");
     }
 
     final opData = await ApiService.getUserData();
@@ -319,16 +603,16 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
     final Map<String, dynamic> body = {
       "id_asignacion": idAsignacion,
       "id_contenedor": idContenedor,
-      "litros": double.tryParse(_litrosController.text) ?? 0.0,
-      "costo": double.tryParse(_costoController.text) ?? 0.0,
-      "odometro": double.tryParse(_odometroController.text) ?? 0.0,
+      "litros": double.tryParse(_litrosController.text.replaceAll(',', '')) ?? 0.0,
+      "costo": double.tryParse(_costoController.text.replaceAll(',', '')) ?? 0.0,
+      "odometro": double.tryParse(_odometroController.text.replaceAll(',', '')) ?? 0.0,
       "latitud": _latitude ?? 0.0,
       "longitud": _longitude ?? 0.0,
       "fecha_registro": DateTime.now().toIso8601String(),
-      "ticket_foto_base64": base64Image,
-      "litros_urea": double.tryParse(_litrosUreaController.text),
-      "costo_urea": double.tryParse(_costoUreaController.text),
-      "ticket_foto_urea_base64": base64UreaImage.isNotEmpty ? base64UreaImage : null,
+      "ticket_foto_base64": base64Images,
+      "litros_urea": double.tryParse(_litrosUreaController.text.replaceAll(',', '')),
+      "costo_urea": double.tryParse(_costoUreaController.text.replaceAll(',', '')),
+      "ticket_foto_urea_base64": base64UreaImages.isNotEmpty ? base64UreaImages : null,
     };
 
     try {
@@ -534,7 +818,7 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text("Costo Registrado:", style: TextStyle(fontWeight: FontWeight.bold)),
+                            const Text("Importe Registrado:", style: TextStyle(fontWeight: FontWeight.bold)),
                             Text("\$${_dieselDatos!['costo']}"),
                           ],
                         ),
@@ -568,68 +852,11 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                             ],
                           ),
                         ],
-                        if (_dieselDatos!['comprobante'] != null) ...[
-                          const SizedBox(height: 15),
-                          const Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              "Comprobante Cargado:",
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                           Stack(
-                             children: [
-                               InkWell(
-                                 onTap: () {
-                                   _descargarYVerArchivo(
-                                     context,
-                                     _dieselDatos!['comprobante'],
-                                     "ticket_diesel_${_idAsignacion ?? 'registro'}.jpg",
-                                   );
-                                 },
-                                 child: ClipRRect(
-                                   borderRadius: BorderRadius.circular(8),
-                                   child: Image.network(
-                                     _dieselDatos!['comprobante'],
-                                     height: 200,
-                                     width: double.infinity,
-                                     fit: BoxFit.cover,
-                                     errorBuilder: (c, o, s) => Container(
-                                       height: 100,
-                                       color: Colors.grey.shade200,
-                                       child: const Center(
-                                         child: Icon(Icons.broken_image, color: Colors.grey),
-                                       ),
-                                     ),
-                                   ),
-                                 ),
-                               ),
-                               Positioned(
-                                 right: 8,
-                                 bottom: 8,
-                                 child: Container(
-                                   decoration: BoxDecoration(
-                                     color: Colors.black.withOpacity(0.6),
-                                     shape: BoxShape.circle,
-                                   ),
-                                   child: IconButton(
-                                     constraints: const BoxConstraints(),
-                                     padding: const EdgeInsets.all(6),
-                                     icon: const Icon(Icons.download, color: Colors.white, size: 20),
-                                     onPressed: () {
-                                       FileDownloader.downloadFile(
-                                         context: context,
-                                         url: _dieselDatos!['comprobante'],
-                                         fileName: "ticket_diesel_${_idAsignacion ?? 'registro'}.jpg",
-                                       );
-                                     },
-                                   ),
-                                 ),
-                               ),
-                             ],
-                           ),
-                        ],
+                        _buildComprobanteList(
+                          _dieselDatos!['comprobante'],
+                          "Comprobantes Diésel Cargados:",
+                          "ticket_diesel",
+                        ),
                         if (_dieselDatos!['litros_urea'] != null || _dieselDatos!['costo_urea'] != null) ...[
                           const Divider(height: 30),
                           const Align(
@@ -644,7 +871,7 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text("Costo Urea:", style: TextStyle(fontWeight: FontWeight.bold)),
+                                const Text("Importe Total Urea:", style: TextStyle(fontWeight: FontWeight.bold)),
                                 Text("\$${_dieselDatos!['costo_urea']}"),
                               ],
                             ),
@@ -660,68 +887,11 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                             ),
                             const SizedBox(height: 8),
                           ],
-                          if (_dieselDatos!['comprobante_urea'] != null) ...[
-                            const SizedBox(height: 10),
-                            const Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                "Comprobante Urea:",
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Stack(
-                              children: [
-                                InkWell(
-                                  onTap: () {
-                                    _descargarYVerArchivo(
-                                      context,
-                                      _dieselDatos!['comprobante_urea'],
-                                      "ticket_urea_${_idAsignacion ?? 'registro'}.jpg",
-                                    );
-                                  },
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(
-                                      _dieselDatos!['comprobante_urea'],
-                                      height: 180,
-                                      width: double.infinity,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (c, o, s) => Container(
-                                        height: 100,
-                                        color: Colors.grey.shade200,
-                                        child: const Center(
-                                          child: Icon(Icons.broken_image, color: Colors.grey),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  right: 8,
-                                  bottom: 8,
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.6),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: IconButton(
-                                      constraints: const BoxConstraints(),
-                                      padding: const EdgeInsets.all(6),
-                                      icon: const Icon(Icons.download, color: Colors.white, size: 20),
-                                      onPressed: () {
-                                        FileDownloader.downloadFile(
-                                          context: context,
-                                          url: _dieselDatos!['comprobante_urea'],
-                                          fileName: "ticket_urea_${_idAsignacion ?? 'registro'}.jpg",
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                          _buildComprobanteList(
+                            _dieselDatos!['comprobante_urea'],
+                            "Comprobantes Urea Cargados:",
+                            "ticket_urea",
+                          ),
                         ],
                       ],
                     ],
@@ -793,6 +963,11 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                   if (value == null || value.trim().isEmpty) {
                     return "Favor de ingresar los litros";
                   }
+                  final cleanValue = value.replaceAll(',', '');
+                  final double? val = double.tryParse(cleanValue);
+                  if (val == null || val <= 0) {
+                    return "Favor de ingresar una cantidad de litros válida y mayor a 0";
+                  }
                   return null;
                 },
               ),
@@ -802,13 +977,18 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                 controller: _costoController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
-                  labelText: "Costo Total (\$)",
+                  labelText: "Importe Total Diesel(\$)",
                   prefixIcon: Icon(Icons.attach_money),
                   border: OutlineInputBorder(),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return "Favor de ingresar el costo total";
+                    return "Favor de ingresar el importe total del tiket de carga";
+                  }
+                  final cleanValue = value.replaceAll(',', '');
+                  final double? val = double.tryParse(cleanValue);
+                  if (val == null || val <= 0) {
+                    return "Favor de ingresar un importe válido mayor a 0";
                   }
                   return null;
                 },
@@ -827,68 +1007,20 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                   if (value == null || value.trim().isEmpty) {
                     return "Favor de ingresar el kilometraje";
                   }
+                  final cleanValue = value.replaceAll(',', '');
+                  final double? val = double.tryParse(cleanValue);
+                  if (val == null || val <= 0) {
+                    return "Favor de ingresar un kilometraje válido mayor a 0";
+                  }
                   return null;
                 },
               ),
               const SizedBox(height: 20),
-              const Text(
-                "Ticket de Carga",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              _buildImageSelector(
+                images: _ticketImages,
+                target: 'diesel',
+                label: "Ticket de Carga, max 3 imagenes",
               ),
-              const SizedBox(height: 10),
-              if (_ticketImage != null)
-                Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: kIsWeb
-                          ? Image.network(
-                              _ticketImage!.path,
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            )
-                          : Image.file(
-                              File(_ticketImage!.path),
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
-                    ),
-                    Positioned(
-                      right: 8,
-                      top: 8,
-                      child: CircleAvatar(
-                        backgroundColor: Colors.red,
-                        child: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.white),
-                          onPressed: () {
-                            setState(() {
-                              _ticketImage = null;
-                            });
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              else
-                SizedBox(
-                  width: double.infinity,
-                  height: 100,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showImageSourceBottomSheet('diesel'),
-                    icon: const Icon(Icons.add_a_photo, size: 28),
-                    label: const Text("Tomar Foto o Cargar Ticket", style: TextStyle(fontSize: 15)),
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      side: BorderSide(color: Colors.blue.shade800, width: 1.5),
-                      foregroundColor: Colors.blue.shade800,
-                    ),
-                  ),
-                ),
               const SizedBox(height: 25),
               const Divider(),
               const SizedBox(height: 15),
@@ -906,6 +1038,22 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                   prefixIcon: Icon(Icons.opacity),
                   border: OutlineInputBorder(),
                 ),
+                validator: (value) {
+                  final bool hasUreaData = _litrosUreaController.text.trim().isNotEmpty ||
+                      _costoUreaController.text.trim().isNotEmpty ||
+                      _ureaImages.isNotEmpty;
+                  if (hasUreaData) {
+                    if (value == null || value.trim().isEmpty) {
+                      return "Favor de ingresar los litros de urea";
+                    }
+                    final cleanValue = value.replaceAll(',', '');
+                    final double? val = double.tryParse(cleanValue);
+                    if (val == null || val <= 0) {
+                      return "Favor de ingresar una cantidad válida mayor a 0";
+                    }
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 15),
 
@@ -913,71 +1061,33 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                 controller: _costoUreaController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
-                  labelText: "Costo Total de Urea (\$)",
+                  labelText: "Importe Total de Urea (\$)",
                   prefixIcon: Icon(Icons.attach_money),
                   border: OutlineInputBorder(),
                 ),
+                validator: (value) {
+                  final bool hasUreaData = _litrosUreaController.text.trim().isNotEmpty ||
+                      _costoUreaController.text.trim().isNotEmpty ||
+                      _ureaImages.isNotEmpty;
+                  if (hasUreaData) {
+                    if (value == null || value.trim().isEmpty) {
+                      return "Favor de ingresar el importe de urea";
+                    }
+                    final cleanValue = value.replaceAll(',', '');
+                    final double? val = double.tryParse(cleanValue);
+                    if (val == null || val <= 0) {
+                      return "Favor de ingresar un importe válido mayor a 0";
+                    }
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 20),
-              
-              const Text(
-                "Ticket de Urea (Opcional)",
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              _buildImageSelector(
+                images: _ureaImages,
+                target: 'urea',
+                label: "Ticket de Urea (Opcional)",
               ),
-              const SizedBox(height: 10),
-              if (_ureaImage != null)
-                Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: kIsWeb
-                          ? Image.network(
-                              _ureaImage!.path,
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            )
-                          : Image.file(
-                              File(_ureaImage!.path),
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
-                    ),
-                    Positioned(
-                      right: 8,
-                      top: 8,
-                      child: CircleAvatar(
-                        backgroundColor: Colors.red,
-                        child: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.white),
-                          onPressed: () {
-                            setState(() {
-                              _ureaImage = null;
-                            });
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              else
-                SizedBox(
-                  width: double.infinity,
-                  height: 100,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showImageSourceBottomSheet('urea'),
-                    icon: const Icon(Icons.add_a_photo, size: 28),
-                    label: const Text("Tomar Foto o Cargar Ticket de Urea", style: TextStyle(fontSize: 15)),
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      side: BorderSide(color: Colors.blueGrey.shade800, width: 1.5),
-                      foregroundColor: Colors.blueGrey.shade800,
-                    ),
-                  ),
-                ),
               const SizedBox(height: 30),
 
               SizedBox(
