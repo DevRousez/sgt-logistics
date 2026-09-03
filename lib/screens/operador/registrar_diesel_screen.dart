@@ -93,6 +93,73 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
     _checkStatus();
   }
 
+  Future<void> _guardarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draft = {
+        'litros': _litrosController.text,
+        'costo': _costoController.text,
+        'odometro': _odometroController.text,
+        'litros_urea': _litrosUreaController.text,
+        'costo_urea': _costoUreaController.text,
+        'latitud': _latitude,
+        'longitud': _longitude,
+        'gps_text': _gpsCoordinates,
+        'ticket_paths': _ticketImages.map((e) => e.path).toList(),
+        'urea_paths': _ureaImages.map((e) => e.path).toList(),
+      };
+      await prefs.setString('draft_diesel_$_idAsignacion', jsonEncode(draft));
+    } catch (_) {}
+  }
+
+  Future<void> _cargarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draftStr = prefs.getString('draft_diesel_$_idAsignacion');
+      if (draftStr != null && !_yaRegistrado) {
+        final draft = jsonDecode(draftStr) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            if (_litrosController.text.isEmpty && draft['litros'] != null) _litrosController.text = draft['litros'].toString();
+            if (_costoController.text.isEmpty && draft['costo'] != null) _costoController.text = draft['costo'].toString();
+            if (_odometroController.text.isEmpty && draft['odometro'] != null) _odometroController.text = draft['odometro'].toString();
+            if (_litrosUreaController.text.isEmpty && draft['litros_urea'] != null) _litrosUreaController.text = draft['litros_urea'].toString();
+            if (_costoUreaController.text.isEmpty && draft['costo_urea'] != null) _costoUreaController.text = draft['costo_urea'].toString();
+            if (_latitude == null && draft['latitud'] != null) {
+              _latitude = double.tryParse(draft['latitud'].toString());
+              _longitude = double.tryParse(draft['longitud'].toString());
+              _gpsCoordinates = draft['gps_text']?.toString() ?? _gpsCoordinates;
+            }
+            if (_ticketImages.isEmpty && draft['ticket_paths'] != null) {
+              for (var p in (draft['ticket_paths'] as List)) {
+                if (File(p.toString()).existsSync()) {
+                  _ticketImages.add(XFile(p.toString()));
+                }
+              }
+            }
+            if (_ureaImages.isEmpty && draft['urea_paths'] != null) {
+              for (var p in (draft['urea_paths'] as List)) {
+                if (File(p.toString()).existsSync()) {
+                  _ureaImages.add(XFile(p.toString()));
+                }
+              }
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _limpiarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('draft_diesel_$_idAsignacion');
+    } catch (_) {}
+  }
+
   Future<void> _checkStatus() async {
     setState(() {
       _validandoEstatus = true;
@@ -145,6 +212,10 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                 _yaRegistrado = true;
               });
             }
+          }
+
+          if (!_yaRegistrado) {
+            await _cargarBorradorLocal();
           }
         }
       }
@@ -224,41 +295,6 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
     }
   }
 
-  Future<void> _pickImage(ImageSource source, String target) async {
-    final currentCount = target == 'diesel' ? _ticketImages.length : _ureaImages.length;
-    if (currentCount >= 3) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Límite alcanzado: Máximo 3 imágenes permitidas para ${target == 'diesel' ? 'diésel' : 'urea'}"),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    try {
-      final pickedFile = await _picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
-      );
-      if (pickedFile != null) {
-        setState(() {
-          if (target == 'diesel') {
-            _ticketImages.add(pickedFile);
-          } else {
-            _ureaImages.add(pickedFile);
-          }
-        });
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error al seleccionar imagen: $e")),
-      );
-    }
-  }
-
   Future<void> _pickMultiImages(String target) async {
     final currentCount = target == 'diesel' ? _ticketImages.length : _ureaImages.length;
     if (currentCount >= 3) {
@@ -273,34 +309,28 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
 
     try {
       final pickedFiles = await _picker.pickMultiImage(
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
+        maxWidth: 1280,
+        maxHeight: 720,
+        imageQuality: 70,
       );
       if (pickedFiles.isNotEmpty) {
         setState(() {
           final spaceLeft = 3 - currentCount;
-          if (target == 'diesel') {
-            if (pickedFiles.length > spaceLeft) {
+          if (pickedFiles.length > spaceLeft) {
+            if (target == 'diesel') {
               _ticketImages.addAll(pickedFiles.take(spaceLeft));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Solo se agregaron las primeras imágenes para no exceder el límite de 3"),
-                  backgroundColor: Colors.orange,
-                ),
-              );
             } else {
-              _ticketImages.addAll(pickedFiles);
-            }
-          } else {
-            if (pickedFiles.length > spaceLeft) {
               _ureaImages.addAll(pickedFiles.take(spaceLeft));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Solo se agregaron las primeras imágenes para no exceder el límite de 3"),
-                  backgroundColor: Colors.orange,
-                ),
-              );
+            }
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Solo se agregaron las primeras imágenes para no exceder el límite de 3"),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          } else {
+            if (target == 'diesel') {
+              _ticketImages.addAll(pickedFiles);
             } else {
               _ureaImages.addAll(pickedFiles);
             }
@@ -309,37 +339,9 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error al seleccionar imágenes: $e")),
+        SnackBar(content: Text("Error al seleccionar imágenes de galería: $e")),
       );
     }
-  }
-
-  void _showImageSourceBottomSheet(String target) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text("Tomar Foto (Cámara)"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera, target);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text("Seleccionar de Galería"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickMultiImages(target);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildImageSelector({
@@ -369,7 +371,7 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                 return Padding(
                   padding: const EdgeInsets.only(right: 8.0, top: 4.0, bottom: 4.0),
                   child: InkWell(
-                    onTap: () => _showImageSourceBottomSheet(target),
+                    onTap: () => _pickMultiImages(target),
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       width: 100,
@@ -380,10 +382,10 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.add_a_photo, color: primaryColor),
+                          Icon(Icons.photo_library, color: primaryColor),
                           const SizedBox(height: 4),
                           Text(
-                            "Agregar",
+                            "Galería",
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -615,6 +617,8 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
       "ticket_foto_urea_base64": base64UreaImages.isNotEmpty ? base64UreaImages : null,
     };
 
+    await _guardarBorradorLocal();
+
     try {
       final response = await ApiService.post(
         ApiEndpoints.guardarCoordenadas,
@@ -622,7 +626,36 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
       );
 
       if (mounted) {
+        if (response.statusCode == 404) {
+          final userData = await ApiService.getUserData() ?? {};
+          userData["id_asignacion"] = null;
+          userData["num_contenedor"] = "N/A";
+          userData["unidad"] = "N/A";
+          userData["id_equipo"] = "N/A";
+          await ApiService.saveUserData(userData);
+          await _limpiarBorradorLocal();
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: const Text("Viaje Cancelado"),
+              content: const Text("Este viaje ya no se encuentra disponible o fue cancelado. Los datos locales de este contenedor han sido limpiados."),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context); // Cierra dialogo
+                    Navigator.pop(context); // Regresa al Dashboard
+                  },
+                  child: const Text("Aceptar"),
+                )
+              ],
+            ),
+          );
+          return;
+        }
+
         if (response.statusCode == 200 || response.statusCode == 201) {
+          await _limpiarBorradorLocal();
           if (_idAsignacion != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setBool('diesel_registrado_$_idAsignacion', true);
@@ -635,11 +668,11 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
           );
           Navigator.pop(context);
         } else {
-          _mostrarSimulacionExitosa(body, errorDetails: "HTTP ${response.statusCode}: ${response.body}");
+          _mostrarErrorEnvio(errorDetails: "HTTP ${response.statusCode}: ${response.body}");
         }
       }
     } catch (e) {
-      _mostrarSimulacionExitosa(body, errorDetails: e.toString());
+      _mostrarErrorEnvio(errorDetails: e.toString());
     } finally {
       if (mounted) {
         setState(() {
@@ -649,57 +682,93 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
     }
   }
 
-  void _mostrarSimulacionExitosa(Map<String, dynamic> datosEnviados, {String? errorDetails}) {
+  void _mostrarErrorEnvio({String? errorDetails}) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.cloud_queue, color: Colors.orange),
+            Icon(Icons.wifi_off, color: Colors.orange, size: 28),
             SizedBox(width: 10),
-            Text("Modo Offline Activo"),
+            Expanded(child: Text("Falla de Conexión")),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("No se pudo conectar al servidor, los datos se guardaron localmente:"),
-            if (kDebugMode && errorDetails != null) ...[
-              const SizedBox(height: 10),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               const Text(
-                "Error Técnico Detallado:",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red),
+                "No se pudo contactar al servidor debido a señal débil o falta de internet en carretera.",
+                style: TextStyle(fontWeight: FontWeight.w500),
               ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 12),
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(6),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.grey.shade300),
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade300),
                 ),
-                child: Text(
-                  errorDetails,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: Colors.black87),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Todos tus datos (Odómetro, Diésel, Coordenadas y Fotos) se conservaron intactos en la pantalla para no perderlos.",
+                        style: TextStyle(fontSize: 12, color: Colors.black87),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              if (kDebugMode && errorDetails != null) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  "Error Técnico Detallado:",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red),
+                ),
+                const SizedBox(height: 5),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 140),
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      errorDetails,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: Colors.black87),
+                    ),
+                  ),
+                ),
+              ],
             ],
-            const SizedBox(height: 10),
-            Text("📍 Coordenadas: ${datosEnviados['latitud']}, ${datosEnviados['longitud']}"),
-            Text("⛽ Diésel: ${datosEnviados['litros']} Lts (\$${datosEnviados['costo']})"),
-            Text("🚗 Odómetro: ${datosEnviados['odometro']} Km"),
-          ],
+          ),
         ),
         actions: [
-          ElevatedButton(
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // SOLO cierra el diálogo, NO sale de la pantalla
+            },
+            child: const Text("Conservar datos"),
+          ),
+          ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context); // Cerrar diálogo
-              Navigator.pop(context); // Regresar al dashboard
+              _guardarRegistro(); // Reintentar
             },
-            child: const Text("Entendido"),
-          )
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text("Reintentar Envío"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade800,
+              foregroundColor: Colors.white,
+            ),
+          ),
         ],
       ),
     );

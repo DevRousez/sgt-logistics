@@ -5,7 +5,7 @@ class ApiConfig {
   // Si está en true, se oculta la configuración del host y se usa la URL de producción.
   static const bool isProduction = false;
 
-  static String baseUrl = "http://localhost:8080/api";
+  static String baseUrl = "https://sgt.gologipro.com/api";
 
   static Future<void> loadConfig() async {
     if (isProduction) {

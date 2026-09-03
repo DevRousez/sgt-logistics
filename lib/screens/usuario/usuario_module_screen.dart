@@ -2,18 +2,23 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
-import '/api/api_service.dart';
-import '/endpoints/api_endpoints.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
-import 'package:flutter_map/flutter_map.dart' as fmap;
-import 'package:latlong2/latlong.dart';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File;
 import 'package:flutter/foundation.dart' show kIsWeb;
-
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
+import 'package:flutter_map/flutter_map.dart' as fmap;
+import 'package:latlong2/latlong.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+
+import '/api/api_service.dart';
+import '/endpoints/api_endpoints.dart';
 import '/config/api_config.dart';
+import '/utils/file_downloader.dart';
 
 class UsuarioModuleScreen extends StatefulWidget {
   final String module;
@@ -1213,25 +1218,6 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                 final documentos = data["documentos"] ?? {};
                 final documentsStatus = data["documents"] ?? {};
                 final isCima = documentsStatus["cima"] == 1 || documentsStatus["cima"] == "1" || (documentos != null && documentos["cima"] == 1);
-                
-                final requiredDocs = [
-                  "boleta_liberacion",
-                  "boleta_vacio",
-                  "carta_porte",
-                  "carta_porte_xml",
-                  "doc_ccp",
-                  if (!isCima) "doc_eir",
-                  "doda"
-                ];
-
-                bool allDocsCompleted = true;
-                for (var doc in requiredDocs) {
-                  final val = documentsStatus[doc];
-                  if (val == null || val == false || val == 0 || val == "0" || val == "") {
-                    allDocsCompleted = false;
-                  }
-                }
-
                 final String beneficiarioTelefono = documentos["beneficiario_telefono"]?.toString() ?? "";
 
                 return DraggableScrollableSheet(
@@ -1296,109 +1282,52 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                         const SizedBox(height: 16),
 
                         _sectionTitle("Checklist de Documentos"),
-                        _docCheckRow("Boleta de Liberación", documentsStatus["boleta_liberacion"], filename: documentos["boleta_liberacion"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
-                        _docCheckRow("Boleta de Vacío", documentsStatus["boleta_vacio"], filename: documentos["boleta_vacio"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
+                        _docCheckRow("Formato CCP", documentsStatus["doc_ccp"], filename: documentos["doc_ccp"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
+                        _docCheckRow("Boleta de liberación", documentsStatus["boleta_liberacion"], filename: documentos["boleta_liberacion"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
+                        _docCheckRow("Doda", documentsStatus["doda"], filename: documentos["doda"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
                         _docCheckRow("Carta Porte PDF", documentsStatus["carta_porte"], filename: documentos["carta_porte"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
                         _docCheckRow("Carta Porte XML", documentsStatus["carta_porte_xml"], filename: documentos["carta_porte_xml"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
-                        _docCheckRow("Carta Porte CCP", documentsStatus["doc_ccp"], filename: documentos["doc_ccp"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
-                        if (!isCima) _docCheckRow("Documento EIR", documentsStatus["doc_eir"], filename: documentos["doc_eir"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
-                        _docCheckRow("Documento DODA", documentsStatus["doda"], filename: documentos["doda"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
-                        if (isCima)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.info, color: Colors.blue, size: 16),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      "CIMA activo: EIR omitido del checklist obligatorio.",
-                                      style: TextStyle(fontSize: 12, color: Colors.blue.shade800),
-                                    ),
-                                  )
-                                ],
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 24),
-
-                        if (row["estatus"] != "Finalizado" && row["estatus"] != "Finalizada")
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: !allDocsCompleted ? null : () async {
-                                final confirm = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text("¿Finalizar viaje?"),
-                                    content: const Text("Confirmas que deseas finalizar esta operación logística."),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancelar")),
-                                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Confirmar")),
-                                    ],
-                                  )
-                                );
-
-                                if (confirm == true) {
-                                  final postResp = await ApiService.post(ApiEndpoints.finalizarViaje, {
-                                    "idContenedor": row["contenedor_id"]?.toString() ?? ""
-                                  });
-                                  if (postResp.statusCode == 200) {
-                                    final pData = jsonDecode(postResp.body);
-                                    if (pData["success"] == true) {
-                                      Navigator.pop(context); 
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text(pData["mensaje"] ?? "Viaje finalizado")),
-                                      );
-                                      fetchData(); 
-                                    } else {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text(pData["mensaje"] ?? "Error")),
-                                      );
-                                    }
-                                  }
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                disabledBackgroundColor: Colors.grey.shade300,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                              child: Text(
-                                allDocsCompleted ? "FINALIZAR VIAJE" : "COMPLETAR CHECKLIST PARA FINALIZAR",
-                                style: const TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          )
+                        _docCheckRow("Prealta - Boleta vacío", documentsStatus["boleta_vacio"], filename: documentos["boleta_vacio"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
+                        if (!isCima)
+                          _docCheckRow("EIR - Comprobante vacío", documentsStatus["doc_eir"], filename: documentos["doc_eir"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? ""))
                         else
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.green.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.green),
-                            ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(Icons.check_circle, color: Colors.green),
-                                const SizedBox(width: 8),
+                                const Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                                const SizedBox(width: 6),
                                 Text(
-                                  "VIAJE FINALIZADO CORRECTAMENTE",
-                                  style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold),
-                                )
+                                  "CIMA Activo: EIR omitido",
+                                  style: TextStyle(fontSize: 12, color: Colors.blue.shade800, fontStyle: FontStyle.italic),
+                                ),
                               ],
                             ),
-                          )
+                          ),
+                        _docCheckRow("Evidencia Descarga", documentsStatus["evidencia_descarga"], filename: documentos["evidencia_descarga"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
+                        _docCheckRow("Complemento de pago PDF", documentsStatus["comprobante_pago_pdf"], filename: documentos["comprobante_pago_pdf"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
+                        _docCheckRow("Complemento de pago XML", documentsStatus["comprobante_pago_xml"], filename: documentos["comprobante_pago_xml"]?.toString(), cotizacionId: int.tryParse(data["cotizacion"]?["id"]?.toString() ?? "")),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () => _generateAndShareTripPdf(
+                              data: data,
+                              documentos: documentos,
+                              documentsStatus: documentsStatus,
+                            ),
+                            icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 20),
+                            label: const Text(
+                              "Resumen Viaje",
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.indigo.shade700,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        ),
                       ],
                     );
                   }
@@ -1409,6 +1338,359 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
         );
       },
     );
+  }
+
+  Future<void> _generateAndShareTripPdf({
+    required Map<String, dynamic> data,
+    required Map<String, dynamic> documentos,
+    required Map<String, dynamic> documentsStatus,
+  }) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text("Generando Resumen PDF..."),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final pdf = pw.Document();
+
+      final String tipo = data["tipo"]?.toString() ?? "Viaje";
+      final String cliente = data["cliente"]?["nombre"]?.toString() ?? "N/A";
+      final String subcliente = data["subcliente"]?["nombre"]?.toString() ?? "N/A";
+      final String proveedor = documentos["Empresa"]?.toString() ?? "N/A";
+      final String transportista = (documentos["transportista_nombre"] != null && documentos["transportista_nombre"].toString().trim().isNotEmpty)
+          ? documentos["transportista_nombre"].toString()
+          : (documentos["Empresa"]?.toString() ?? "N/A");
+      final String numContenedor = documentsStatus["num_contenedor"]?.toString() ?? documentos["num_contenedor"]?.toString() ?? "N/A";
+      final String origen = data["cotizacion"]?["origen"]?.toString() ?? "N/A";
+      final String destino = data["cotizacion"]?["destino"]?.toString() ?? "N/A";
+      final String operador = documentos["operador"]?.toString() ?? "N/A";
+      final String telefono = documentos["beneficiario_telefono"]?.toString() ?? "N/A";
+      final String placas = documentos["placas_camion"]?.toString() ?? "N/A";
+      final String unidad = documentos["id_equipo_camion"]?.toString() ?? "N/A";
+      final String marca = documentos["marca_camion"]?.toString() ?? "N/A";
+      final String chasis = documentos["id_equipo_chasis"]?.toString() ?? "N/A";
+      final String fechaInicio = documentos["fecha_inicio"]?.toString() ?? "N/A";
+      final String fechaFin = documentos["fecha_fin"]?.toString() ?? "N/A";
+      final bool isCima = documentsStatus["cima"] == 1 || documentsStatus["cima"] == "1" || documentos["cima"] == 1;
+
+      final List<Map<String, String>> docsList = [
+        {
+          "nombre": "Formato CCP",
+          "status": (documentsStatus["doc_ccp"] != null && documentsStatus["doc_ccp"] != false && documentsStatus["doc_ccp"] != 0 && documentsStatus["doc_ccp"] != "0" && documentsStatus["doc_ccp"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["doc_ccp"]?.toString() ?? "-"
+        },
+        {
+          "nombre": "Boleta de liberación",
+          "status": (documentsStatus["boleta_liberacion"] != null && documentsStatus["boleta_liberacion"] != false && documentsStatus["boleta_liberacion"] != 0 && documentsStatus["boleta_liberacion"] != "0" && documentsStatus["boleta_liberacion"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["boleta_liberacion"]?.toString() ?? "-"
+        },
+        {
+          "nombre": "Doda",
+          "status": (documentsStatus["doda"] != null && documentsStatus["doda"] != false && documentsStatus["doda"] != 0 && documentsStatus["doda"] != "0" && documentsStatus["doda"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["doda"]?.toString() ?? "-"
+        },
+        {
+          "nombre": "Carta Porte PDF",
+          "status": (documentsStatus["carta_porte"] != null && documentsStatus["carta_porte"] != false && documentsStatus["carta_porte"] != 0 && documentsStatus["carta_porte"] != "0" && documentsStatus["carta_porte"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["carta_porte"]?.toString() ?? "-"
+        },
+        {
+          "nombre": "Carta Porte XML",
+          "status": (documentsStatus["carta_porte_xml"] != null && documentsStatus["carta_porte_xml"] != false && documentsStatus["carta_porte_xml"] != 0 && documentsStatus["carta_porte_xml"] != "0" && documentsStatus["carta_porte_xml"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["carta_porte_xml"]?.toString() ?? "-"
+        },
+        {
+          "nombre": "Prealta - Boleta vacío",
+          "status": (documentsStatus["boleta_vacio"] != null && documentsStatus["boleta_vacio"] != false && documentsStatus["boleta_vacio"] != 0 && documentsStatus["boleta_vacio"] != "0" && documentsStatus["boleta_vacio"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["boleta_vacio"]?.toString() ?? "-"
+        },
+        if (!isCima)
+          {
+            "nombre": "EIR - Comprobante vacío",
+            "status": (documentsStatus["doc_eir"] != null && documentsStatus["doc_eir"] != false && documentsStatus["doc_eir"] != 0 && documentsStatus["doc_eir"] != "0" && documentsStatus["doc_eir"] != "") ? "CARGADO" : "PENDIENTE",
+            "archivo": documentos["doc_eir"]?.toString() ?? "-"
+          }
+        else
+          {
+            "nombre": "EIR - Comprobante vacío",
+            "status": "CIMA ACTIVO (OMITIDO)",
+            "archivo": "CIMA"
+          },
+        {
+          "nombre": "Evidencia Descarga",
+          "status": (documentsStatus["evidencia_descarga"] != null && documentsStatus["evidencia_descarga"] != false && documentsStatus["evidencia_descarga"] != 0 && documentsStatus["evidencia_descarga"] != "0" && documentsStatus["evidencia_descarga"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["evidencia_descarga"]?.toString() ?? "-"
+        },
+        {
+          "nombre": "Complemento de pago PDF",
+          "status": (documentsStatus["comprobante_pago_pdf"] != null && documentsStatus["comprobante_pago_pdf"] != false && documentsStatus["comprobante_pago_pdf"] != 0 && documentsStatus["comprobante_pago_pdf"] != "0" && documentsStatus["comprobante_pago_pdf"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["comprobante_pago_pdf"]?.toString() ?? "-"
+        },
+        {
+          "nombre": "Complemento de pago XML",
+          "status": (documentsStatus["comprobante_pago_xml"] != null && documentsStatus["comprobante_pago_xml"] != false && documentsStatus["comprobante_pago_xml"] != 0 && documentsStatus["comprobante_pago_xml"] != "0" && documentsStatus["comprobante_pago_xml"] != "") ? "CARGADO" : "PENDIENTE",
+          "archivo": documentos["comprobante_pago_xml"]?.toString() ?? "-"
+        },
+      ];
+
+      final fontBase = pw.Font.helvetica();
+      final fontBold = pw.Font.helveticaBold();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(24),
+          build: (pw.Context context) {
+            return [
+              // Header
+              pw.Container(
+                padding: const pw.EdgeInsets.all(12),
+                decoration: const pw.BoxDecoration(
+                  color: PdfColors.blue900,
+                  borderRadius: pw.BorderRadius.all(pw.Radius.circular(6)),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          "SGT LOGISTICS",
+                          style: pw.TextStyle(font: fontBold, color: PdfColors.white, fontSize: 16),
+                        ),
+                        pw.Text(
+                          "Resumen Operativo de Viaje",
+                          style: pw.TextStyle(font: fontBase, color: PdfColors.white, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: const pw.BoxDecoration(
+                        color: PdfColors.white,
+                        borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+                      ),
+                      child: pw.Text(
+                        tipo.toUpperCase(),
+                        style: pw.TextStyle(font: fontBold, color: PdfColors.blue900, fontSize: 10),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 14),
+
+              // Contenedor Highlight
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                  border: pw.Border.all(color: PdfColors.grey400),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text("CONTENEDOR(ES):", style: pw.TextStyle(font: fontBold, fontSize: 11, color: PdfColors.blueGrey800)),
+                    pw.Text(numContenedor, style: pw.TextStyle(font: fontBold, fontSize: 12, color: PdfColors.blue900)),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 14),
+
+              // Sección 1: Información Operativa
+              pw.Text("1. INFORMACIÓN OPERATIVA", style: pw.TextStyle(font: fontBold, fontSize: 12, color: PdfColors.blue900)),
+              pw.Divider(color: PdfColors.blue900, thickness: 1),
+              pw.SizedBox(height: 4),
+              pw.Table(
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(2),
+                  1: const pw.FlexColumnWidth(3),
+                  2: const pw.FlexColumnWidth(2),
+                  3: const pw.FlexColumnWidth(3),
+                },
+                children: [
+                  pw.TableRow(children: [
+                    pw.Text("Cliente:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(cliente, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                    pw.Text("Subcliente:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(subcliente, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                  ]),
+                  pw.TableRow(children: [
+                    pw.Text("Proveedor:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(proveedor, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                    pw.Text("Transportista:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(transportista, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                  ]),
+                  pw.TableRow(children: [
+                    pw.Text("Origen:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(origen, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                    pw.Text("Destino:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(destino, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                  ]),
+                  pw.TableRow(children: [
+                    pw.Text("Fecha Inicio:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(fechaInicio, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                    pw.Text("Fecha Fin:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(fechaFin, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                  ]),
+                ],
+              ),
+              pw.SizedBox(height: 14),
+
+              // Sección 2: Asignación de Tránsito
+              pw.Text("2. ASIGNACIÓN DE TRÁNSITO", style: pw.TextStyle(font: fontBold, fontSize: 12, color: PdfColors.blue900)),
+              pw.Divider(color: PdfColors.blue900, thickness: 1),
+              pw.SizedBox(height: 4),
+              pw.Table(
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(2),
+                  1: const pw.FlexColumnWidth(3),
+                  2: const pw.FlexColumnWidth(2),
+                  3: const pw.FlexColumnWidth(3),
+                },
+                children: [
+                  pw.TableRow(children: [
+                    pw.Text("Operador:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(operador, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                    pw.Text("Teléfono:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(telefono, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                  ]),
+                  pw.TableRow(children: [
+                    pw.Text("Unidad / Eco:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(unidad, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                    pw.Text("Placas:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(placas, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                  ]),
+                  pw.TableRow(children: [
+                    pw.Text("Marca:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(marca, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                    pw.Text("Chasis ID:", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(chasis, style: pw.TextStyle(font: fontBase, fontSize: 9)),
+                  ]),
+                ],
+              ),
+              pw.SizedBox(height: 14),
+
+              // Sección 3: Checklist de Documentos
+              pw.Text("3. CHECKLIST DE DOCUMENTACIÓN", style: pw.TextStyle(font: fontBold, fontSize: 12, color: PdfColors.blue900)),
+              pw.Divider(color: PdfColors.blue900, thickness: 1),
+              pw.SizedBox(height: 4),
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                    children: [
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text("DOCUMENTO", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text("ESTADO", style: pw.TextStyle(font: fontBold, fontSize: 9), textAlign: pw.TextAlign.center),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text("ARCHIVO ADJUNTO", style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                      ),
+                    ],
+                  ),
+                  ...docsList.map((d) {
+                    final bool isOk = d["status"] == "CARGADO";
+                    return pw.TableRow(
+                      children: [
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(5),
+                          child: pw.Text(d["nombre"]!, style: pw.TextStyle(font: fontBase, fontSize: 8.5)),
+                        ),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(5),
+                          child: pw.Text(
+                            isOk ? "[OK] CARGADO" : "[-] PENDIENTE",
+                            style: pw.TextStyle(
+                              font: fontBold,
+                              fontSize: 8.5,
+                              color: isOk ? PdfColors.green800 : PdfColors.red800,
+                            ),
+                            textAlign: pw.TextAlign.center,
+                          ),
+                        ),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(5),
+                          child: pw.Text(
+                            d["archivo"]!,
+                            style: pw.TextStyle(
+                              font: fontBase,
+                              fontSize: 7.5,
+                              color: isOk ? PdfColors.black : PdfColors.grey600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+
+              // Footer
+              pw.Divider(color: PdfColors.grey400),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "Generado desde SGT Móvil - Sistema de Gestión de Transporte",
+                    style: pw.TextStyle(font: fontBase, fontSize: 8, color: PdfColors.grey600),
+                  ),
+                  pw.Text(
+                    "Fecha de emisión: ${DateTime.now().toLocal().toString().split('.')[0]}",
+                    style: pw.TextStyle(font: fontBase, fontSize: 8, color: PdfColors.grey600),
+                  ),
+                ],
+              ),
+            ];
+          },
+        ),
+      );
+
+      final bytes = await pdf.save();
+      final dir = await getTemporaryDirectory();
+      final cleanNum = numContenedor.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      final file = File('${dir.path}/Detalle_Viaje_$cleanNum.pdf');
+      await file.writeAsBytes(bytes);
+
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: "Resumen de Viaje - Contenedor: $numContenedor\nTipo: $tipo\nOperador: $operador",
+          subject: "Detalle de Viaje $numContenedor",
+        ),
+      );
+    } catch (e) {
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al generar PDF: $e")),
+      );
+    }
   }
 
   Widget _sectionTitle(String title) {
@@ -1625,6 +1907,27 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                         _webModalRow("  Placas:", chasisAPlacas),
                       ],
                     ),
+                    if (waText != null && waText.trim().isNotEmpty)
+                      _buildWebModalSection(
+                        title: "Información para operador",
+                        icon: Icons.chat,
+                        color: Colors.green,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: SelectableText(
+                              waText,
+                              style: const TextStyle(fontSize: 12, height: 1.4, color: Colors.black87),
+                            ),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -1637,20 +1940,10 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
               ),
               if (waText != null && waText.isNotEmpty)
                 ElevatedButton.icon(
-                  onPressed: () async {
-                    final String encodedText = Uri.encodeComponent(waText);
-                    final Uri waUri = Uri.parse("https://api.whatsapp.com/send?text=$encodedText");
-                    if (await canLaunchUrl(waUri)) {
-                      await launchUrl(waUri, mode: LaunchMode.externalApplication);
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("No se pudo abrir WhatsApp")),
-                      );
-                    }
-                  },
+                  onPressed: () => _shareTripText(waText),
                   icon: const Icon(Icons.share, color: Colors.white, size: 16),
                   label: const Text("Compartir WhatsApp", style: TextStyle(color: Colors.white)),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
                 ),
             ],
           ),
@@ -1663,6 +1956,60 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Error al cargar la información del viaje.")),
       );
+    }
+  }
+
+  Future<void> _shareTripText(String text) async {
+    if (text.isEmpty) return;
+    final encodedText = Uri.encodeComponent(text);
+    final Uri waUri = Uri.parse("whatsapp://send?text=$encodedText");
+    final Uri waWebUri = Uri.parse("https://api.whatsapp.com/send?text=$encodedText");
+
+    try {
+      if (await canLaunchUrl(waUri)) {
+        await launchUrl(waUri, mode: LaunchMode.externalApplication);
+        return;
+      } else if (await canLaunchUrl(waWebUri)) {
+        await launchUrl(waWebUri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (_) {}
+
+    await SharePlus.instance.share(ShareParams(text: text));
+  }
+
+  Future<void> _shareDocumentFile(String url, String fileName, String docTitle) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+
+      if (response.statusCode != 200) {
+        throw Exception("Error de descarga (${response.statusCode})");
+      }
+
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(response.bodyBytes);
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(tempFile.path)],
+          text: 'Documento: $docTitle',
+        ),
+      );
+    } catch (e) {
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error al compartir documento: $e"), backgroundColor: Colors.redAccent),
+        );
+      }
     }
   }
 
@@ -1730,57 +2077,60 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
   Widget _docCheckRow(String label, dynamic value, {String? filename, int? cotizacionId}) {
     final bool isCompleted = value != null && value != false && value != 0 && value != "0" && value != "";
     final bool canLaunch = isCompleted && filename != null && filename.isNotEmpty && cotizacionId != null;
+    final cleanBaseUrl = ApiConfig.baseUrl.replaceAll('/api', '');
+    final fileUrl = canLaunch ? "$cleanBaseUrl/cotizaciones/cotizacion$cotizacionId/$filename" : "";
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: InkWell(
-        onTap: canLaunch
-            ? () async {
-                final cleanBaseUrl = ApiConfig.baseUrl.replaceAll('/api', '');
-                final fileUrl = "$cleanBaseUrl/cotizaciones/cotizacion$cotizacionId/$filename";
-                final Uri uri = Uri.parse(fileUrl);
-
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Abriendo documento..."),
-                      duration: Duration(seconds: 2),
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: canLaunch
+                  ? () {
+                      FileDownloader.downloadFile(
+                        context: context,
+                        url: fileUrl,
+                        fileName: filename,
+                      );
+                    }
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6.0),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: canLaunch ? Colors.blue.shade900 : Colors.black87,
+                          fontWeight: canLaunch ? FontWeight.w600 : FontWeight.normal,
+                          decoration: canLaunch ? TextDecoration.underline : TextDecoration.none,
+                        ),
+                      ),
                     ),
-                  );
-                }
-
-                try {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("No se pudo abrir el documento: $e")),
-                    );
-                  }
-                }
-              }
-            : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Text(label),
-                  if (canLaunch) ...[
-                    const SizedBox(width: 6),
-                    const Icon(Icons.open_in_new, size: 14, color: Colors.blueAccent),
+                    if (canLaunch) ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.file_download, size: 16, color: Colors.blue),
+                    ],
                   ],
-                ],
+                ),
               ),
-              Icon(
-                isCompleted ? Icons.check_circle : Icons.cancel,
-                color: isCompleted ? Colors.green : Colors.grey.shade400,
-              ),
-            ],
+            ),
           ),
-        ),
+          if (canLaunch) ...[
+            IconButton(
+              icon: const Icon(Icons.share, color: Colors.green, size: 18),
+              tooltip: "Compartir $label",
+              onPressed: () => _shareDocumentFile(fileUrl, filename, label),
+            ),
+          ],
+          Icon(
+            isCompleted ? Icons.check_circle : Icons.cancel,
+            color: isCompleted ? Colors.green : Colors.grey.shade400,
+          ),
+        ],
       ),
     );
   }
@@ -2186,10 +2536,10 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                               final bool useGoogleMaps = kIsWeb || (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS);
                               if (useGoogleMaps) {
                                 _googleMapController?.animateCamera(
-                                  gmaps.CameraUpdate.newLatLngZoom(gmaps.LatLng(lat!, lng!), 15),
+                                  gmaps.CameraUpdate.newLatLngZoom(gmaps.LatLng(lat, lng), 15),
                                 );
                               } else {
-                                _mapController.move(LatLng(lat!, lng!), 15);
+                                _mapController.move(LatLng(lat, lng), 15);
                               }
                               _fetchDestinationAndRoute(item, LatLng(lat, lng));
                             },
@@ -3276,9 +3626,26 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
         final String fechaFin = item["fecha_fin"]?.toString() ?? "N/A";
         final String operador = item["operador"]?.toString() ?? "N/A";
         final String proveedor = item["proveedor"]?.toString() ?? "N/A";
-        final String transportista = item["transportista"]?.toString() ?? proveedor ?? "N/A";
+        final String transportista = item["transportista"]?.toString() ?? proveedor;
         final String origen = item["origen"]?.toString() ?? "N/A";
         final String destino = item["destino"]?.toString() ?? "N/A";
+        final bool isCima = item["cima"] == 1 || item["cima"] == "1" || item["cima"] == true;
+        final int? cotId = int.tryParse(item["cotizacion_id"]?.toString() ?? "");
+        
+        final List<dynamic> docValues = [
+          item["doc_ccp"],
+          item["boleta_liberacion"],
+          item["doda"],
+          item["carta_porte"],
+          item["carta_porte_xml"],
+          item["boleta_vacio"],
+          if (!isCima) item["doc_eir"],
+          item["evidencia_descarga"],
+          item["comprobante_pago_pdf"],
+          item["comprobante_pago_xml"],
+        ];
+        final int docsCount = docValues.where((v) => v != null && v != false && v != 0 && v != "0" && v.toString().trim().isNotEmpty).length;
+        final int totalDocs = isCima ? 9 : 10;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
@@ -3333,41 +3700,68 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                 _buildPlaneacionInfoRow(Icons.business, "Proveedor", proveedor),
                 const SizedBox(height: 6),
                 _buildPlaneacionInfoRow(Icons.local_shipping, "Transportista", transportista),
+
                 const Divider(height: 20),
-                const Text(
-                  "Documentación del Viaje:",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blueGrey),
-                ),
-                const SizedBox(height: 6),
-                _docCheckRow(
-                  "Carta Porte PDF",
-                  item["carta_porte"],
-                  filename: item["carta_porte"]?.toString(),
-                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
-                ),
-                _docCheckRow(
-                  "Carta Porte XML",
-                  item["carta_porte_xml"],
-                  filename: item["carta_porte_xml"]?.toString(),
-                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
-                ),
-                _docCheckRow(
-                  "Documento DODA",
-                  item["doda"],
-                  filename: item["doda"]?.toString(),
-                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
-                ),
-                _docCheckRow(
-                  "Boleta de Liberación",
-                  item["boleta_liberacion"],
-                  filename: item["boleta_liberacion"]?.toString(),
-                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
-                ),
-                _docCheckRow(
-                  "Boleta de Vacío",
-                  item["boleta_vacio"],
-                  filename: item["boleta_vacio"]?.toString(),
-                  cotizacionId: int.tryParse(item["cotizacion_id"]?.toString() ?? ""),
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(top: 4, bottom: 8),
+                    title: Row(
+                      children: [
+                        const Icon(Icons.folder_open, size: 18, color: Colors.blueGrey),
+                        const SizedBox(width: 8),
+                        const Text(
+                          "Documentación del Viaje",
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blueGrey),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: docsCount > 0 ? Colors.green.shade50 : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: docsCount > 0 ? Colors.green.shade400 : Colors.grey.shade400),
+                          ),
+                          child: Text(
+                            "$docsCount/$totalDocs",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: docsCount > 0 ? Colors.green.shade800 : Colors.grey.shade700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    children: [
+                      _docCheckRow("Formato CCP", item["doc_ccp"], filename: item["doc_ccp"]?.toString(), cotizacionId: cotId),
+                      _docCheckRow("Boleta de liberación", item["boleta_liberacion"], filename: item["boleta_liberacion"]?.toString(), cotizacionId: cotId),
+                      _docCheckRow("Doda", item["doda"], filename: item["doda"]?.toString(), cotizacionId: cotId),
+                      _docCheckRow("Carta Porte PDF", item["carta_porte"], filename: item["carta_porte"]?.toString(), cotizacionId: cotId),
+                      _docCheckRow("Carta Porte XML", item["carta_porte_xml"], filename: item["carta_porte_xml"]?.toString(), cotizacionId: cotId),
+                      _docCheckRow("Prealta - Boleta vacío", item["boleta_vacio"], filename: item["boleta_vacio"]?.toString(), cotizacionId: cotId),
+                      if (!isCima)
+                        _docCheckRow("EIR - Comprobante vacío", item["doc_eir"], filename: item["doc_eir"]?.toString(), cotizacionId: cotId)
+                      else
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4.0),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                              const SizedBox(width: 6),
+                              Text(
+                                "CIMA Activo: EIR omitido",
+                                style: TextStyle(fontSize: 12, color: Colors.blue.shade800, fontStyle: FontStyle.italic),
+                              ),
+                            ],
+                          ),
+                        ),
+                      _docCheckRow("Evidencia Descarga", item["evidencia_descarga"], filename: item["evidencia_descarga"]?.toString(), cotizacionId: cotId),
+                      _docCheckRow("Complemento de pago PDF", item["comprobante_pago_pdf"], filename: item["comprobante_pago_pdf"]?.toString(), cotizacionId: cotId),
+                      _docCheckRow("Complemento de pago XML", item["comprobante_pago_xml"], filename: item["comprobante_pago_xml"]?.toString(), cotizacionId: cotId),
+                    ],
+                  ),
                 ),
                 const Divider(height: 20),
                 Row(

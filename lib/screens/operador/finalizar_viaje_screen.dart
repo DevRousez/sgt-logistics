@@ -231,6 +231,10 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
               });
             }
           }
+
+          if (!_yaRegistrado) {
+            await _cargarBorradorLocal();
+          }
         }
       }
     } catch (e) {
@@ -244,52 +248,70 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
     }
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _guardarBorradorLocal() async {
+    if (_idAsignacion == null) return;
     try {
-      final pickedFile = await _picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
+      final prefs = await SharedPreferences.getInstance();
+      final draft = {
+        'photo_paths': _photos.map((e) => e.path).toList(),
+        'latitud': _latitude,
+        'longitud': _longitude,
+      };
+      await prefs.setString('draft_finalizar_$_idAsignacion', jsonEncode(draft));
+    } catch (_) {}
+  }
+
+  Future<void> _cargarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draftStr = prefs.getString('draft_finalizar_$_idAsignacion');
+      if (draftStr != null && !_yaRegistrado) {
+        final draft = jsonDecode(draftStr) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            if (_latitude == null && draft['latitud'] != null) {
+              _latitude = double.tryParse(draft['latitud'].toString());
+              _longitude = double.tryParse(draft['longitud'].toString());
+            }
+            if (_photos.isEmpty && draft['photo_paths'] != null) {
+              for (var p in (draft['photo_paths'] as List)) {
+                if (File(p.toString()).existsSync()) {
+                  _photos.add(XFile(p.toString()));
+                }
+              }
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _limpiarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('draft_finalizar_$_idAsignacion');
+    } catch (_) {}
+  }
+
+  Future<void> _pickGalleryImages() async {
+    try {
+      final pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 1280,
+        maxHeight: 720,
+        imageQuality: 70,
       );
-      if (pickedFile != null && mounted) {
+      if (pickedFiles.isNotEmpty && mounted) {
         setState(() {
-          _photos.add(pickedFile);
+          _photos.addAll(pickedFiles);
         });
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error al capturar foto: $e")),
+        SnackBar(content: Text("Error al seleccionar fotos de galería: $e")),
       );
     }
-  }
-
-  void _showImageSourceBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text("Tomar Foto (Cámara)"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text("Seleccionar de Galería"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.gallery);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _finalizarViaje() async {
@@ -314,6 +336,8 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
       "longitud": _longitude,
     };
 
+    await _guardarBorradorLocal();
+
     try {
       final response = await ApiService.post(
         ApiEndpoints.finalizarViajeOperador,
@@ -321,7 +345,36 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
       );
 
       if (mounted) {
+        if (response.statusCode == 404) {
+          final userData = await ApiService.getUserData() ?? {};
+          userData["id_asignacion"] = null;
+          userData["num_contenedor"] = "N/A";
+          userData["unidad"] = "N/A";
+          userData["id_equipo"] = "N/A";
+          await ApiService.saveUserData(userData);
+          await _limpiarBorradorLocal();
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: const Text("Viaje Cancelado"),
+              content: const Text("Este viaje ya no se encuentra disponible o fue cancelado. Los datos locales de este contenedor han sido limpiados."),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context); // Cierra dialogo
+                    Navigator.pop(context); // Regresa al Dashboard
+                  },
+                  child: const Text("Aceptar"),
+                )
+              ],
+            ),
+          );
+          return;
+        }
+
         if (response.statusCode == 200 || response.statusCode == 201) {
+          await _limpiarBorradorLocal();
           if (_idAsignacion != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setBool('viaje_finalizado_$_idAsignacion', true);
@@ -335,22 +388,21 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
           setState(() {
             _yaRegistrado = true;
           });
+
+          final data = await ApiService.getUserData() ?? {};
+
+          data["id_asignacion"] = null;
+          data["num_contenedor"] = "N/A";
+          data["unidad"] = "N/A";
+          data["id_equipo"] = "N/A";
+
+          await ApiService.saveUserData(data);
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("Error al concluir viaje: ${response.body}"),
-              backgroundColor: Colors.red,
-            ),
-          );
+          _mostrarErrorEnvio(errorDetails: "HTTP ${response.statusCode}: ${response.body}");
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Error de conexión: $e"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _mostrarErrorEnvio(errorDetails: e.toString());
     } finally {
       if (mounted) {
         setState(() {
@@ -358,6 +410,98 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
         });
       }
     }
+  }
+
+  void _mostrarErrorEnvio({String? errorDetails}) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.wifi_off, color: Colors.orange, size: 28),
+            SizedBox(width: 10),
+            Expanded(child: Text("Falla de Conexión")),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "No se pudo contactar al servidor debido a señal débil o falta de internet en carretera.",
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade300),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Las ${_photos.length} fotos y coordenadas se conservan intactas en pantalla.",
+                        style: const TextStyle(fontSize: 12, color: Colors.black87),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (kDebugMode && errorDetails != null) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  "Detalle Técnico del Error:",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red),
+                ),
+                const SizedBox(height: 5),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 140),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      errorDetails,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.black87),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // SOLO cierra diálogo
+            },
+            child: const Text("Conservar fotos"),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _finalizarViaje(); // Reintentar
+            },
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text("Reintentar Envío"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade800,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -662,13 +806,14 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                           itemBuilder: (context, index) {
                             if (index == _photos.length) {
                               return GestureDetector(
-                                onTap: _showImageSourceBottomSheet,
+                                onTap: _pickGalleryImages,
                                 child: Container(
                                   decoration: BoxDecoration(
                                     border: Border.all(color: Colors.blue.shade800, width: 1.5),
                                     borderRadius: BorderRadius.circular(12),
+                                    color: Colors.blue.shade50,
                                   ),
-                                  child: Icon(Icons.add_a_photo, color: Colors.blue.shade800, size: 28),
+                                  child: Icon(Icons.add_photo_alternate, color: Colors.blue.shade800, size: 28),
                                 ),
                               );
                             }
@@ -707,9 +852,9 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                           width: double.infinity,
                           height: 100,
                           child: OutlinedButton.icon(
-                            onPressed: _showImageSourceBottomSheet,
-                            icon: const Icon(Icons.add_a_photo, size: 28),
-                            label: const Text("Tomar Foto / Evidencia", style: TextStyle(fontSize: 15)),
+                            onPressed: _pickGalleryImages,
+                            icon: const Icon(Icons.photo_library, size: 28),
+                            label: const Text("Seleccionar Fotos de Galería", style: TextStyle(fontSize: 15)),
                             style: OutlinedButton.styleFrom(
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),

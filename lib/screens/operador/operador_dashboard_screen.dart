@@ -17,6 +17,7 @@ import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
 import '/config/api_config.dart';
 import '../../utils/file_downloader.dart';
+import '../../services/notification_service.dart';
 
 class OperadorDashboardScreen extends StatefulWidget {
   const OperadorDashboardScreen({super.key});
@@ -41,6 +42,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
     super.initState();
     _loadOperatorData().then((_) {
       _checkPendingAssignment();
+      NotificationService.fetchAndScheduleNotification();
     });
     // Configurar el sondeo automático cada 30 segundos
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
@@ -65,6 +67,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
     );
     await _loadOperatorData();
     await _checkPendingAssignment();
+    await NotificationService.fetchAndScheduleNotification();
   }
 
   Future<void> _loadOperatorData() async {
@@ -84,6 +87,26 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
       final response = await ApiService.get(ApiEndpoints.checkAsignacion);
       if (response.statusCode == 200) {
         final resData = jsonDecode(response.body);
+        
+        // Sincronización automática de viaje cancelado o deshecho en web (Silenciosa)
+        final dynamic activeIdRaw = resData["viaje_activo_id"];
+        final int? activeIdBackend = activeIdRaw != null ? int.tryParse(activeIdRaw.toString()) : null;
+        if (_idAsignacion != null && activeIdBackend == null) {
+          final userData = await ApiService.getUserData() ?? {};
+          userData["id_asignacion"] = null;
+          userData["num_contenedor"] = "N/A";
+          userData["unidad"] = "N/A";
+          userData["id_equipo"] = "N/A";
+          await ApiService.saveUserData(userData);
+          if (mounted) {
+            setState(() {
+              _idAsignacion = null;
+              _unidad = "N/A";
+              _idEquipo = "N/A";
+            });
+          }
+        }
+
         if (resData["success"] == true && resData["data"] != null) {
           final assignment = resData["data"];
           final int? idAsig = int.tryParse(assignment["id_asignacion"]?.toString() ?? "");
@@ -426,6 +449,110 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
     );
   }
 
+  void _showNotificationDiagnosticsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.notifications_active, color: Colors.blue),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Diagnóstico Notificaciones",
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("📍 Zona Horaria: ${NotificationService.timezoneName ?? 'Detectando...'}",
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    Text("⏰ Hora Celular: ${DateTime.now()}",
+                        style: const TextStyle(fontSize: 12)),
+                    const SizedBox(height: 6),
+                    const Text("📅 Info Programación Servidor:",
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text(NotificationService.lastScheduledInfo ?? "Aún no programada",
+                        style: const TextStyle(fontSize: 12, color: Colors.blueGrey)),
+                    const Divider(height: 24),
+                    const Text("Pruebas de Notificación:",
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 38),
+                      ),
+                      icon: const Icon(Icons.flash_on, size: 18),
+                      label: const Text("Notificación Inmediata (Ya)"),
+                      onPressed: () async {
+                        await NotificationService.showInstantTestNotification();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Notificación enviada al instante.")),
+                          );
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 38),
+                      ),
+                      icon: const Icon(Icons.timer, size: 18),
+                      label: const Text("Programar en 10 segundos"),
+                      onPressed: () async {
+                        final scheduledDate = await NotificationService.scheduleTestNotificationInSeconds(10);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text("Programada para las ${scheduledDate.hour}:${scheduledDate.minute.toString().padLeft(2, '0')}:${scheduledDate.second.toString().padLeft(2, '0')}. ¡Bloquea la pantalla o sal de la app!"),
+                              duration: const Duration(seconds: 4),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 38),
+                      ),
+                      icon: const Icon(Icons.sync, size: 18),
+                      label: const Text("Recargar del Servidor"),
+                      onPressed: () async {
+                        await NotificationService.fetchAndScheduleNotification();
+                        setDialogState(() {});
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Cerrar"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -438,6 +565,12 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
         appBar: AppBar(
           title: const Text('Panel Operador'),
           actions: [
+            if (!ApiConfig.isProduction)
+              IconButton(
+                onPressed: _showNotificationDiagnosticsDialog,
+                icon: const Icon(Icons.notifications_active_outlined),
+                tooltip: 'Diagnóstico de Notificaciones',
+              ),
             IconButton(
               onPressed: _manualRefresh,
               icon: const Icon(Icons.refresh),
@@ -461,6 +594,71 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
         ),
         body: ListView(
           children: [
+            if (NotificationService.isTodayNotificationDay())
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade700, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.amber.withValues(alpha: 0.15),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, color: Colors.amber.shade900, size: 24),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            "Recordatorio de Gastos (Hoy ${NotificationService.getWeekdayName(NotificationService.configuredWeekday)})",
+                            style: TextStyle(
+                              color: Colors.amber.shade900,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Se requiere que capture los gastos de los viajes de la semana, ya que está próximo a su liquidación.",
+                      style: TextStyle(color: Colors.brown.shade900, fontSize: 13),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber.shade800,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.receipt_long, size: 18),
+                        label: const Text("Ir a Gastos de Viaje", style: TextStyle(fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GastosViajeScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ListTile(
               leading: const Icon(Icons.local_gas_station),
               title: const Text('Registrar Diesel'),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '/utils/app_logger.dart';
 
 class ApiService {
   static String? token;
@@ -10,13 +11,13 @@ class ApiService {
     token = newToken;
     final prefs = await SharedPreferences.getInstance();
     if (newToken.isEmpty) {
-      print("ApiService: Cleared session and user data");
+      AppLogger.logInfo("ApiService: Cleared session and user data");
       await prefs.remove('auth_token');
       await prefs.remove('session_type');
       await prefs.remove('user_data');
       sessionType = null;
     } else {
-      print("ApiService: Saving auth_token=$newToken, type=$type");
+      AppLogger.logInfo("ApiService: Saving auth_token (type=$type)");
       await prefs.setString('auth_token', newToken);
       if (type != null) {
         sessionType = type;
@@ -27,7 +28,6 @@ class ApiService {
 
   static Future<void> saveUserData(Map<dynamic, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
-    print("ApiService: Saving user data: $data");
     await prefs.setString('user_data', jsonEncode(Map<String, dynamic>.from(data)));
   }
 
@@ -44,7 +44,7 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     token = prefs.getString('auth_token');
     sessionType = prefs.getString('session_type');
-    print("ApiService: Loaded session token=$token, type=$sessionType");
+    AppLogger.logInfo("ApiService: Loaded session token (type=$sessionType)");
   }
 
   static Map<String, String> _headers() {
@@ -67,23 +67,32 @@ class ApiService {
       url = uri.replace(queryParameters: newQueryParams).toString();
     }
 
-    print("=== ApiService GET Request ===");
-    print("URL: $url");
-    print("Headers: ${_headers()}");
-
+    final stopwatch = Stopwatch()..start();
     try {
       final response = await http.get(
         Uri.parse(url),
         headers: _headers(),
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 35));
 
-      print("=== ApiService GET Response ===");
-      print("Status Code: ${response.statusCode}");
-      print("Body: ${response.body}");
+      stopwatch.stop();
+      AppLogger.logHttp(
+        method: 'GET',
+        url: url,
+        statusCode: response.statusCode,
+        error: response.statusCode >= 400 ? response.body : null,
+        durationMs: stopwatch.elapsedMilliseconds,
+        payloadBytes: response.bodyBytes.length,
+      );
+
       return response;
     } catch (e) {
-      print("=== ApiService GET Error ===");
-      print("Error: $e");
+      stopwatch.stop();
+      AppLogger.logHttp(
+        method: 'GET',
+        url: url,
+        error: e,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
       rethrow;
     }
   }
@@ -95,30 +104,41 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     final selectedEmpresaId = prefs.getInt('selected_empresa_id');
     if (selectedEmpresaId != null && !body.containsKey('id_empresa')) {
-      // Create a mutable copy of body to avoid modifying immutable inputs
       body = Map<String, dynamic>.from(body);
       body['id_empresa'] = selectedEmpresaId;
     }
 
-    print("=== ApiService POST Request ===");
-    print("URL: $url");
-    print("Headers: ${_headers()}");
-    print("Body: ${jsonEncode(body)}");
+    final stopwatch = Stopwatch()..start();
+    final encodedBody = jsonEncode(body);
+    final payloadSize = encodedBody.length;
 
     try {
       final response = await http.post(
         Uri.parse(url),
         headers: _headers(),
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 30));
+        body: encodedBody,
+      ).timeout(const Duration(seconds: 45));
 
-      print("=== ApiService POST Response ===");
-      print("Status Code: ${response.statusCode}");
-      print("Body: ${response.body}");
+      stopwatch.stop();
+      AppLogger.logHttp(
+        method: 'POST',
+        url: url,
+        statusCode: response.statusCode,
+        error: response.statusCode >= 400 ? response.body : null,
+        durationMs: stopwatch.elapsedMilliseconds,
+        payloadBytes: payloadSize,
+      );
+
       return response;
     } catch (e) {
-      print("=== ApiService POST Error ===");
-      print("Error: $e");
+      stopwatch.stop();
+      AppLogger.logHttp(
+        method: 'POST',
+        url: url,
+        error: e,
+        durationMs: stopwatch.elapsedMilliseconds,
+        payloadBytes: payloadSize,
+      );
       rethrow;
     }
   }

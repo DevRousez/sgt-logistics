@@ -5,6 +5,7 @@ import 'dart:convert';
 import '../operador/operador_dashboard_screen.dart';
 import '/endpoints/api_endpoints.dart';
 import '/api/api_service.dart';
+import '../../services/notification_service.dart';
 
 class OperadorLoginScreen extends StatefulWidget {
   const OperadorLoginScreen({super.key});
@@ -32,7 +33,7 @@ class _OperadorLoginScreenState extends State<OperadorLoginScreen> {
     });
     try {
       final response = await ApiService.post(
-        ApiEndpoints.validateOperador,
+        ApiEndpoints.login,
         {
           "usuario": usuarioController.text.trim(),
           "contrasena": contrasenaController.text.trim(),
@@ -50,6 +51,8 @@ class _OperadorLoginScreenState extends State<OperadorLoginScreen> {
         if (data["data"] != null) {
           await ApiService.saveUserData(data["data"]);
         }
+        // Programar notificación dinámica al iniciar sesión
+        NotificationService.fetchAndScheduleNotification();
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(

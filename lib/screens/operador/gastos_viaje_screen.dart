@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
 import '/config/api_config.dart';
@@ -162,13 +168,13 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
     });
   }
 
-  Future<void> _capturarFoto(int index, ImageSource source) async {
+  Future<void> _capturarFoto(int index) async {
     try {
       final XFile? pickedFile = await _picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
+        source: ImageSource.gallery,
+        maxWidth: 1280,
+        maxHeight: 720,
+        imageQuality: 70,
       );
       if (pickedFile != null) {
         setState(() {
@@ -177,37 +183,9 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error al capturar foto: $e")),
+        SnackBar(content: Text("Error al seleccionar ticket de galería: $e")),
       );
     }
-  }
-
-  void _showImageSourceBottomSheet(int index) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text("Tomar Foto (Cámara)"),
-              onTap: () {
-                Navigator.pop(context);
-                _capturarFoto(index, ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text("Seleccionar de Galería"),
-              onTap: () {
-                Navigator.pop(context);
-                _capturarFoto(index, ImageSource.gallery);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _guardarGastos() async {
@@ -284,16 +262,12 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Error al registrar gastos: ${response.body}"), backgroundColor: Colors.red),
-          );
+          _mostrarErrorEnvio(errorDetails: "HTTP ${response.statusCode}: ${response.body}");
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error de conexión: $e"), backgroundColor: Colors.red),
-        );
+        _mostrarErrorEnvio(errorDetails: e.toString());
       }
     } finally {
       if (mounted) {
@@ -302,6 +276,98 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
         });
       }
     }
+  }
+
+  void _mostrarErrorEnvio({String? errorDetails}) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.wifi_off, color: Colors.orange, size: 28),
+            SizedBox(width: 10),
+            Expanded(child: Text("Falla de Conexión")),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "No se pudo registrar los gastos en el servidor debido a señal débil o falta de internet en carretera.",
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade300),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Los ${_gastos.length} conceptos y montos capturados se conservan intactos en la pantalla.",
+                        style: const TextStyle(fontSize: 12, color: Colors.black87),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (kDebugMode && errorDetails != null) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  "Detalle Técnico del Error:",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red),
+                ),
+                const SizedBox(height: 5),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 140),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      errorDetails,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.black87),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // SOLO cierra diálogo
+            },
+            child: const Text("Conservar gastos"),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _guardarGastos(); // Reintentar
+            },
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text("Reintentar Envío"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade800,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showImageDialog(String url) {
@@ -322,6 +388,165 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
     );
   }
 
+  String _formatCurrency(dynamic amount) {
+    final double numVal = (amount is num) 
+        ? amount.toDouble() 
+        : (double.tryParse(amount?.toString().replaceAll(',', '') ?? '0') ?? 0.0);
+    List<String> parts = numVal.toStringAsFixed(2).split('.');
+    RegExp reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+    String formattedInt = parts[0].replaceAllMapped(reg, (Match match) => '${match[1]},');
+    return '\$$formattedInt.${parts[1]}';
+  }
+
+  Future<void> _generarReporteViaticos() async {
+    if (_viajes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No hay viajes pendientes para generar el reporte.")),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      double totalGeneral = 0.0;
+      List<Map<String, dynamic>> reporteData = [];
+
+      // Fetch expenses for all pending trips in parallel
+      final List<Future<http.Response>> requests = _viajes.map((viaje) {
+        final idAsig = viaje["id_asignacion"];
+        return ApiService.get("${ApiEndpoints.obtenerGastosViaje}/$idAsig");
+      }).toList();
+
+      final List<http.Response> responses = await Future.wait(requests);
+
+      for (int i = 0; i < _viajes.length; i++) {
+        final viaje = _viajes[i];
+        final response = responses[i];
+        final String numContenedor = viaje["num_contenedor"]?.toString() ?? "Sin Contenedor";
+        final String ref = viaje["referencia_full"]?.toString() ?? "";
+
+        List<Map<String, dynamic>> gastos = [];
+        if (response.statusCode == 200) {
+          final resData = jsonDecode(response.body);
+          if (resData["success"] == true && resData["data"] != null) {
+            final List<dynamic> list = resData["data"];
+            for (var item in list) {
+              final String concepto = item["concepto"] ?? "Sin Concepto";
+              final double monto = double.tryParse(item["monto"]?.toString() ?? "0") ?? 0.0;
+              gastos.add({"concepto": concepto, "monto": monto});
+              totalGeneral += monto;
+            }
+          }
+        }
+
+        reporteData.add({
+          "num_contenedor": numContenedor,
+          "referencia": ref,
+          "gastos": gastos,
+        });
+      }
+
+
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return [
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Reporte de Viaticos - Sita App', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+                    pw.Text(DateTime.now().toString().substring(0, 10), style: const pw.TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              ...reporteData.map((data) {
+                final String contenedor = data["num_contenedor"];
+                final String referencia = data["referencia"];
+                final List<dynamic> gastos = data["gastos"];
+
+                return pw.Container(
+                  margin: const pw.EdgeInsets.only(bottom: 15),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Contenedor: $contenedor', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                      pw.SizedBox(height: 5),
+                      if (gastos.isEmpty)
+                        pw.Text('  * no se capturo gastos', style: pw.TextStyle(fontSize: 12, fontStyle: pw.FontStyle.italic, color: PdfColors.grey))
+                      else
+                        pw.Column(
+                          children: gastos.map((g) {
+                            return pw.Padding(
+                              padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 10),
+                              child: pw.Row(
+                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                children: [
+                                  pw.Text(g["concepto"], style: const pw.TextStyle(fontSize: 12)),
+                                  pw.Text(_formatCurrency(g["monto"]), style: const pw.TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      pw.Divider(thickness: 0.5),
+                    ],
+                  ),
+                );
+              }),
+              pw.SizedBox(height: 20),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Total General:', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                  pw.Text(_formatCurrency(totalGeneral), style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.orange800)),
+                ],
+              ),
+            ];
+          },
+        ),
+      );
+
+
+      final output = await getTemporaryDirectory();
+      final file = File("${output.path}/reporte_viaticos_${DateTime.now().millisecondsSinceEpoch}.pdf");
+      await file.writeAsBytes(await pdf.save());
+
+
+      if (mounted) Navigator.pop(context);
+
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'Reporte de Viáticos - Sita App',
+        ),
+      );
+
+    } catch (e) {
+      //
+      if (mounted) Navigator.pop(context);
+      debugPrint("Error generating PDF: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error al generar reporte: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     for (var row in _gastos) {
@@ -338,6 +563,14 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gastos de Viaje'),
+        actions: [
+          if (_viajes.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf),
+              tooltip: 'Generar reporte de viáticos',
+              onPressed: _generarReporteViaticos,
+            ),
+        ],
       ),
       body: _loadingViajes
           ? const Center(child: CircularProgressIndicator())
@@ -383,12 +616,12 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
                             },
                             items: _viajes.map((viaje) {
                               final String numContenedor = viaje["num_contenedor"]?.toString() ?? "Sin Contenedor";
-                              final String ref = viaje["referencia_full"]?.toString() ?? "Sin Referencia";
+                              final String ref = viaje["referencia_full"]?.toString() ?? "";
                               final String camion = viaje["economico_camion"]?.toString() ?? "N/A";
                               final String placas = viaje["placas_camion"]?.toString() ?? "N/A";
                               return DropdownMenuItem<int>(
                                 value: int.tryParse(viaje["id_asignacion"]?.toString() ?? ""),
-                                child: Text("$numContenedor ($ref) - Camión: $camion ($placas)"),
+                                child: Text("$numContenedor - Camión: $camion ($placas)"),
                               );
                             }).toList(),
                           ),
@@ -423,7 +656,7 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
                               child: ListTile(
                                 leading: const Icon(Icons.receipt, color: Colors.grey),
                                 title: Text(concepto),
-                                subtitle: Text("Monto: \$$monto"),
+                                subtitle: Text("Monto: ${_formatCurrency(monto)}"),
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -452,7 +685,7 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
                         const SizedBox(height: 20),
                       ],
 
-                      // 2. Formulario para capturar nuevos gastos
+
                       Card(
                         elevation: 1,
                         shape: RoundedRectangleBorder(
@@ -546,9 +779,9 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
                                       children: [
                                         Expanded(
                                           child: OutlinedButton.icon(
-                                            onPressed: () => _showImageSourceBottomSheet(index),
-                                            icon: const Icon(Icons.add_a_photo, size: 18),
-                                            label: Text(row.photo == null ? "Subir Ticket (Opcional)" : "Cambiar Ticket"),
+                                            onPressed: () => _capturarFoto(index),
+                                            icon: const Icon(Icons.photo_library, size: 18),
+                                            label: Text(row.photo == null ? "Seleccionar Ticket" : "Cambiar Ticket"),
                                             style: OutlinedButton.styleFrom(
                                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                             ),

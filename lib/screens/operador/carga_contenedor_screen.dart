@@ -83,6 +83,8 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
   bool _yaRegistrado = false;
   bool _validandoEstatus = true;
   List<String> _fotosGuardadas = [];
+  double? _latitude;
+  double? _longitude;
 
   Map<String, dynamic>? _operatorData;
   String _numContenedor = "N/A";
@@ -112,6 +114,53 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
         });
       }
     }
+  }
+
+  Future<void> _guardarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draft = {
+        'photo_paths': _photos.map((e) => e.path).toList(),
+        'latitud': _latitude,
+        'longitud': _longitude,
+      };
+      await prefs.setString('draft_carga_$_idAsignacion', jsonEncode(draft));
+    } catch (_) {}
+  }
+
+  Future<void> _cargarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draftStr = prefs.getString('draft_carga_$_idAsignacion');
+      if (draftStr != null && !_yaRegistrado) {
+        final draft = jsonDecode(draftStr) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            if (_latitude == null && draft['latitud'] != null) {
+              _latitude = double.tryParse(draft['latitud'].toString());
+              _longitude = double.tryParse(draft['longitud'].toString());
+            }
+            if (_photos.isEmpty && draft['photo_paths'] != null) {
+              for (var p in (draft['photo_paths'] as List)) {
+                if (File(p.toString()).existsSync()) {
+                  _photos.add(XFile(p.toString()));
+                }
+              }
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _limpiarBorradorLocal() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('draft_carga_$_idAsignacion');
+    } catch (_) {}
   }
 
   Future<void> _checkStatus() async {
@@ -190,9 +239,13 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
         });
       }
     }
+
+    if (!_yaRegistrado) {
+      await _cargarBorradorLocal();
+    }
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _pickGalleryImages() async {
     if (_photos.length >= 10) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -204,50 +257,32 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
     }
 
     try {
-      final pickedFile = await _picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
+      final pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 1280,
+        maxHeight: 720,
+        imageQuality: 70,
       );
-      if (pickedFile != null) {
+      if (pickedFiles.isNotEmpty) {
         setState(() {
-          _photos.add(pickedFile);
+          final spaceLeft = 10 - _photos.length;
+          if (pickedFiles.length > spaceLeft) {
+            _photos.addAll(pickedFiles.take(spaceLeft));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Solo se agregaron las fotos necesarias para completar el límite de 10"),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          } else {
+            _photos.addAll(pickedFiles);
+          }
         });
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error al capturar foto: $e")),
+        SnackBar(content: Text("Error al seleccionar fotos de galería: $e")),
       );
     }
-  }
-
-  void _showImageSourceBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text("Tomar Foto (Cámara)"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text("Seleccionar de Galería"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.gallery);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _iniciarViaje() async {
@@ -304,6 +339,8 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
       "longitud": longitude,
     };
 
+    await _guardarBorradorLocal();
+
     try {
       final response = await ApiService.post(
         ApiEndpoints.iniciarViaje,
@@ -311,7 +348,36 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
       );
 
       if (mounted) {
+        if (response.statusCode == 404) {
+          final userData = await ApiService.getUserData() ?? {};
+          userData["id_asignacion"] = null;
+          userData["num_contenedor"] = "N/A";
+          userData["unidad"] = "N/A";
+          userData["id_equipo"] = "N/A";
+          await ApiService.saveUserData(userData);
+          await _limpiarBorradorLocal();
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: const Text("Viaje Cancelado"),
+              content: const Text("Este viaje ya no se encuentra disponible o fue cancelado. Los datos locales de este contenedor han sido limpiados."),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context); // Cierra dialogo
+                    Navigator.pop(context); // Regresa al Dashboard
+                  },
+                  child: const Text("Aceptar"),
+                )
+              ],
+            ),
+          );
+          return;
+        }
+
         if (response.statusCode == 200 || response.statusCode == 201) {
+          await _limpiarBorradorLocal();
           if (_idAsignacion != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setBool('viaje_iniciado_$_idAsignacion', true);
@@ -324,11 +390,11 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
           );
           Navigator.pop(context);
         } else {
-          _mostrarOfflineDialog(body, errorDetails: "HTTP ${response.statusCode}: ${response.body}");
+          _mostrarErrorEnvio(errorDetails: "HTTP ${response.statusCode}: ${response.body}");
         }
       }
     } catch (e) {
-      _mostrarOfflineDialog(body, errorDetails: e.toString());
+      _mostrarErrorEnvio(errorDetails: e.toString());
     } finally {
       if (mounted) {
         setState(() {
@@ -338,55 +404,93 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
     }
   }
 
-  void _mostrarOfflineDialog(Map<String, dynamic> body, {String? errorDetails}) {
+  void _mostrarErrorEnvio({String? errorDetails}) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.cloud_off, color: Colors.orange),
+            Icon(Icons.wifi_off, color: Colors.orange, size: 28),
             SizedBox(width: 10),
-            Text("Modo Offline"),
+            Expanded(child: Text("Falla de Conexión")),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "No se pudo conectar al servidor. El viaje se iniciará de forma local y las ${_photos.length} fotos se subirán al sincronizar.",
-            ),
-            if (kDebugMode && errorDetails != null) ...[
-              const SizedBox(height: 15),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               const Text(
-                "Detalle Técnico del Error:",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red),
+                "No se pudo contactar al servidor debido a la señal débil o falta de internet en carretera.",
+                style: TextStyle(fontWeight: FontWeight.w500),
               ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 12),
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.grey.shade300),
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade300),
                 ),
-                child: Text(
-                  errorDetails,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.black87),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Las ${_photos.length} fotos y coordenadas se conservan intactas en pantalla.",
+                        style: const TextStyle(fontSize: 12, color: Colors.black87),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              if (kDebugMode && errorDetails != null) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  "Detalle Técnico del Error:",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red),
+                ),
+                const SizedBox(height: 5),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 140),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      errorDetails,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.black87),
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
         actions: [
-          ElevatedButton(
+          TextButton(
             onPressed: () {
-              Navigator.pop(context); // Cerrar diálogo
-              Navigator.pop(context); // Regresar al panel anterior
+              Navigator.pop(context); // SOLO cierra diálogo, NO sale de la pantalla
             },
-            child: const Text("Entendido"),
-          )
+            child: const Text("Conservar fotos"),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _iniciarViaje(); // Reintentar
+            },
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text("Reintentar Envío"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade800,
+              foregroundColor: Colors.white,
+            ),
+          ),
         ],
       ),
     );
@@ -645,14 +749,14 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
                   itemBuilder: (context, index) {
                     if (index == _photos.length) {
                       return InkWell(
-                        onTap: _showImageSourceBottomSheet,
+                        onTap: _pickGalleryImages,
                         child: Container(
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.blue.shade800, width: 1.5),
                             borderRadius: BorderRadius.circular(12),
                             color: Colors.blue.shade50,
                           ),
-                          child: Icon(Icons.add_a_photo, color: Colors.blue.shade800),
+                          child: Icon(Icons.add_photo_alternate, color: Colors.blue.shade800, size: 30),
                         ),
                       );
                     }
@@ -690,7 +794,7 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
               else
                 // Estado vacío cuando no hay fotos
                 InkWell(
-                  onTap: _showImageSourceBottomSheet,
+                  onTap: _pickGalleryImages,
                   child: Container(
                     width: double.infinity,
                     height: 150,
@@ -702,11 +806,16 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.add_a_photo, size: 40, color: Colors.grey.shade600),
+                        Icon(Icons.photo_library, size: 40, color: Colors.blue.shade700),
                         const SizedBox(height: 10),
                         Text(
-                          "Presiona aquí para capturar fotos",
-                          style: TextStyle(color: Colors.grey.shade600),
+                          "Presiona aquí para seleccionar fotos de la galería",
+                          style: TextStyle(color: Colors.blue.shade900, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "(Toma las fotos con tu cámara y selecciónalas aquí)",
+                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                         ),
                       ],
                     ),

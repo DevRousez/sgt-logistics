@@ -45,6 +45,11 @@ dependencies:
   google_maps_flutter: ^2.14.2
   path_provider: ^2.1.5
   open_filex: ^4.7.0
+  flutter_local_notifications: ^20.1.0
+  timezone: ^0.10.1
+  pdf: ^3.11.3
+  share_plus: ^12.0.2
+  flutter_timezone: ^5.1.0
 
 dev_dependencies:
   flutter_test:

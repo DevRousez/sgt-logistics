@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../usuario/usuario_dashboard_screen.dart';
 import '/endpoints/api_endpoints.dart';
 import '/api/api_service.dart';
+import '../../services/notification_service.dart';
 
 class UsuarioLoginScreen extends StatefulWidget {
   const UsuarioLoginScreen({super.key});
@@ -51,6 +52,8 @@ class _UsuarioLoginScreenState extends State<UsuarioLoginScreen> {
         if (data["data"] != null) {
           await ApiService.saveUserData(Map<String, dynamic>.from(data["data"]));
         }
+        // Programar notificación dinámica al iniciar sesión
+        NotificationService.fetchAndScheduleNotification();
         if (mounted) {
           Navigator.pushReplacement(
             context,

@@ -3,9 +3,6 @@ import '/config/api_config.dart';
 class ApiEndpoints {
   static String get login => "${ApiConfig.baseUrl}/login";
 
-  static String get validateOperador =>
-      "${ApiConfig.baseUrl}/validate-operador";
-
   static String get cotizaciones => "${ApiConfig.baseUrl}/dashboard/cotizaciones";
   static String get viajes => "${ApiConfig.baseUrl}/dashboard/viajes";
   static String get contenedores => "${ApiConfig.baseUrl}/dashboard/contenedores";
@@ -14,6 +11,8 @@ class ApiEndpoints {
   static String get planeacion => "${ApiConfig.baseUrl}/dashboard/planeacion";
   static String get reportes => "${ApiConfig.baseUrl}/dashboard/reportes";
   static String get empresasPropias => "${ApiConfig.baseUrl}/dashboard/empresas-propias";
+  static String get documentosEmpresasContenedores =>
+      "${ApiConfig.baseUrl}/documentos-empresas/contenedores";
 
   static String get infoViaje => "${ApiConfig.baseUrl}/dashboard/info-viaje";
   static String get finalizarViaje => "${ApiConfig.baseUrl}/dashboard/finalizar-viaje";
@@ -28,4 +27,6 @@ class ApiEndpoints {
   static String get registrarGastosViaje => "${ApiConfig.baseUrl}/operador/registrar-gastos-viaje";
   static String get obtenerGastosViaje => "${ApiConfig.baseUrl}/operador/obtener-gastos-viaje";
   static String get eliminarGastoViaje => "${ApiConfig.baseUrl}/operador/eliminar-gasto-viaje";
+  static String get notificationConfig => "${ApiConfig.baseUrl}/operador/notification-config";
+  static String get appLogs => "${ApiConfig.baseUrl}/app-logs";
 }
