@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 import '../operador/operador_dashboard_screen.dart';
 import '/endpoints/api_endpoints.dart';
 import '/api/api_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/operador_sync_service.dart';
 
 class OperadorLoginScreen extends StatefulWidget {
   const OperadorLoginScreen({super.key});
@@ -51,8 +51,11 @@ class _OperadorLoginScreenState extends State<OperadorLoginScreen> {
         if (data["data"] != null) {
           await ApiService.saveUserData(data["data"]);
         }
+        // Sincronizar de inmediato si el operador tiene un viaje activo en curso
+        await OperadorSyncService.sincronizarSiEsNecesario();
         // Programar notificación dinámica al iniciar sesión
         NotificationService.fetchAndScheduleNotification();
+        if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(

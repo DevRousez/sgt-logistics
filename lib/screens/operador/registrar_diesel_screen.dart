@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
 import '../../utils/file_downloader.dart';
+import '../../services/operador_sync_service.dart';
 
 class RegistrarDieselScreen extends StatefulWidget {
   const RegistrarDieselScreen({super.key});
@@ -165,12 +166,22 @@ class _RegistrarDieselScreenState extends State<RegistrarDieselScreen> {
       _validandoEstatus = true;
     });
     try {
-      final opData = await ApiService.getUserData();
+      Map<String, dynamic>? opData = await ApiService.getUserData();
+      final int? asigId = int.tryParse(opData?["id_asignacion"]?.toString() ?? "");
+      final String? numCont = opData?["num_contenedor"]?.toString();
+
+      if (asigId == null || numCont == null || numCont.isEmpty || numCont == "N/A") {
+        final synced = await OperadorSyncService.sincronizarSiEsNecesario();
+        if (synced != null) {
+          opData = synced;
+        }
+      }
+
       if (opData != null) {
         final dynamic asigId = opData["id_asignacion"];
         setState(() {
           _idAsignacion = int.tryParse(asigId?.toString() ?? "");
-          _numContenedor = opData["num_contenedor"]?.toString() ?? "N/A";
+          _numContenedor = opData!["num_contenedor"]?.toString() ?? "N/A";
           _unidad = opData["unidad"]?.toString() ?? "N/A";
         });
         if (_idAsignacion != null) {

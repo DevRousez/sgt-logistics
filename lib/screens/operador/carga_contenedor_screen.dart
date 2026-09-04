@@ -13,6 +13,7 @@ import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
 import '/config/api_config.dart';
 import '../../utils/file_downloader.dart';
+import '../../services/operador_sync_service.dart';
 
 class CargaContenedorScreen extends StatefulWidget {
   const CargaContenedorScreen({super.key});
@@ -98,11 +99,21 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
   }
 
   Future<void> _loadOperatorInfo() async {
-    final data = await ApiService.getUserData();
+    Map<String, dynamic>? data = await ApiService.getUserData();
+    final int? asigId = int.tryParse(data?["id_asignacion"]?.toString() ?? "");
+    final String? numCont = data?["num_contenedor"]?.toString();
+    
+    if (asigId == null || numCont == null || numCont.isEmpty || numCont == "N/A") {
+      final synced = await OperadorSyncService.sincronizarSiEsNecesario();
+      if (synced != null) {
+        data = synced;
+      }
+    }
+
     if (data != null && mounted) {
       setState(() {
         _operatorData = data;
-        _numContenedor = data["num_contenedor"]?.toString() ?? "N/A";
+        _numContenedor = data!["num_contenedor"]?.toString() ?? "N/A";
         _unidad = data["unidad"]?.toString() ?? "N/A";
         _idAsignacion = int.tryParse(data["id_asignacion"]?.toString() ?? "");
       });

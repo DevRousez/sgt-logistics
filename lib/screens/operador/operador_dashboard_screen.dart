@@ -18,6 +18,7 @@ import '/endpoints/api_endpoints.dart';
 import '/config/api_config.dart';
 import '../../utils/file_downloader.dart';
 import '../../services/notification_service.dart';
+import '../../services/operador_sync_service.dart';
 
 class OperadorDashboardScreen extends StatefulWidget {
   const OperadorDashboardScreen({super.key});
@@ -103,6 +104,20 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
               _idAsignacion = null;
               _unidad = "N/A";
               _idEquipo = "N/A";
+            });
+          }
+        } else if (activeIdBackend != null && activeIdBackend > 0 &&
+            (_idAsignacion == null || _idAsignacion != activeIdBackend || _unidad == "N/A")) {
+          // Sincronización automática de viaje en curso (tras reinstalación, nuevo login o desincronización)
+          final updatedData = await OperadorSyncService.sincronizarViajeActivo(
+            activeIdBackend,
+            checkData: resData,
+          );
+          if (updatedData != null && mounted) {
+            setState(() {
+              _idAsignacion = activeIdBackend;
+              _unidad = updatedData["unidad"]?.toString() ?? _unidad ?? "N/A";
+              _idEquipo = updatedData["id_equipo"]?.toString() ?? _idEquipo ?? "N/A";
             });
           }
         }
@@ -215,47 +230,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
     }
   }
 
-  Future<void> _descargarYVerArchivo(BuildContext context, String url, String fileName) async {
-    try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Descargando $fileName..."),
-          duration: const Duration(seconds: 2),
-        ),
-      );
 
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final tempDir = await getTemporaryDirectory();
-        final file = File('${tempDir.path}/$fileName');
-        await file.writeAsBytes(response.bodyBytes);
-
-        await OpenFilex.open(file.path);
-      } else {
-        throw Exception("Status code: ${response.statusCode}");
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("No se pudo abrir localmente. Abriendo en navegador..."),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      try {
-        final Uri uri = Uri.parse(url);
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } catch (err) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("Error al abrir enlace: $err"),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-  }
 
   Future<void> _fetchAndShowDocuments() async {
     setState(() {
@@ -267,6 +242,19 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
         final data = await ApiService.getUserData();
         if (data != null) {
           _idAsignacion = int.tryParse(data["id_asignacion"]?.toString() ?? "");
+        }
+      }
+
+      if (_idAsignacion == null) {
+        final synced = await OperadorSyncService.sincronizarSiEsNecesario();
+        if (synced != null) {
+          _idAsignacion = int.tryParse(synced["id_asignacion"]?.toString() ?? "");
+          if (mounted) {
+            setState(() {
+              _unidad = synced["unidad"]?.toString() ?? _unidad;
+              _idEquipo = synced["id_equipo"]?.toString() ?? _idEquipo;
+            });
+          }
         }
       }
 
@@ -302,14 +290,18 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
 
               docData.forEach((key, value) {
                 final keyStr = key.toString().toLowerCase();
-                if (value != null && value.toString().isNotEmpty && 
-                    (keyStr.contains('doda') || 
-                     keyStr.contains('boleta') || 
-                     keyStr.contains('carta_porte') ||
-                     keyStr.contains('eir') ||
-                     keyStr.contains('pdf') ||
-                     keyStr.contains('xml') ||
-                     keyStr.contains('documento'))) {
+                if (keyStr == 'documentos' || keyStr == 'documentos_viaje') return;
+                if (value is! String) return;
+                final valStr = value.trim();
+                if (valStr.isEmpty || valStr.startsWith('{') || valStr.startsWith('[')) return;
+
+                if (keyStr.contains('doda') || 
+                    keyStr.contains('boleta') || 
+                    keyStr.contains('carta_porte') ||
+                    keyStr.contains('eir') ||
+                    keyStr.contains('pdf') ||
+                    keyStr.contains('xml') ||
+                    keyStr.contains('documento')) {
                   
                   // Generar un nombre limpio legible
                   String label = key.toString().replaceAll('_', ' ').toUpperCase();
@@ -318,7 +310,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
                   if (label == "DODA") label = "Documento DODA";
                   if (label == "CARTA PORTE") label = "Carta Porte PDF";
 
-                  String urlStr = value.toString();
+                  String urlStr = valStr;
                   if (!urlStr.startsWith('http')) {
                     urlStr = "$cleanBaseUrl/cotizaciones/cotizacion$cotizacionId/$urlStr";
                   }
@@ -367,13 +359,27 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
                     IconButton(
                       icon: const Icon(Icons.download_for_offline, color: Colors.blue),
                       tooltip: "Descargar todos",
-                      onPressed: () {
-                        final List<String> urls = _documentos.map((d) => d["url"]?.toString() ?? "").toList();
-                        FileDownloader.downloadAllFiles(
-                          context: context,
-                          urls: urls,
-                          prefix: "documento_viaje",
-                        );
+                      onPressed: () async {
+                        final List<String> urls = [];
+                        final List<String> fileNames = [];
+                        for (int i = 0; i < _documentos.length; i++) {
+                          final doc = _documentos[i];
+                          final String url = doc["url"]?.toString() ?? "";
+                          if (url.isNotEmpty) {
+                            urls.add(url);
+                            final String nombre = doc["nombre"]?.toString() ?? "documento_${i + 1}";
+                            final String extension = FileDownloader.detectExtension(url, defaultExt: 'pdf');
+                            fileNames.add("${nombre.replaceAll(' ', '_')}.$extension");
+                          }
+                        }
+                        if (urls.isNotEmpty) {
+                          await FileDownloader.downloadAllFiles(
+                            context: context,
+                            urls: urls,
+                            fileNames: fileNames,
+                            prefix: "documento_viaje",
+                          );
+                        }
                       },
                     ),
                 ],
@@ -394,7 +400,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
                             itemBuilder: (context, index) {
                               final doc = _documentos[index];
                               final String url = doc["url"] ?? "";
-                              final String extension = url.endsWith('.xml') ? 'xml' : 'pdf';
+                              final String extension = FileDownloader.detectExtension(url, defaultExt: 'pdf');
                               return ListTile(
                                 leading: Icon(
                                   extension == 'xml' ? Icons.code : Icons.picture_as_pdf,
@@ -410,7 +416,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
                                   onPressed: () {
                                     final String url = doc["url"] ?? "";
                                     final String nombre = doc["nombre"] ?? "documento";
-                                    final String extension = url.endsWith('.xml') ? 'xml' : 'pdf';
+                                    final String extension = FileDownloader.detectExtension(url, defaultExt: 'pdf');
                                     if (url.isNotEmpty) {
                                       FileDownloader.downloadFile(
                                         context: context,
@@ -423,7 +429,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
                                 onTap: () {
                                   final String url = doc["url"] ?? "";
                                   final String nombre = doc["nombre"] ?? "documento";
-                                  final String extension = url.endsWith('.xml') ? 'xml' : 'pdf';
+                                  final String extension = FileDownloader.detectExtension(url, defaultExt: 'pdf');
                                   if (url.isNotEmpty) {
                                     FileDownloader.downloadFile(
                                       context: context,
@@ -674,25 +680,27 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
             ListTile(
               leading: const Icon(Icons.local_shipping),
               title: const Text('Iniciar Viaje / Carga Contenedor'),
-              onTap: () {
-                Navigator.push(
+              onTap: () async {
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => const CargaContenedorScreen(),
                   ),
                 );
+                _loadOperatorData();
               },
             ),
             ListTile(
               leading: const Icon(Icons.check_circle_outline, color: Colors.red),
               title: const Text('Concluir Viaje'),
-              onTap: () {
-                Navigator.push(
+              onTap: () async {
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => const FinalizarViajeScreen(),
                   ),
                 );
+                _loadOperatorData();
               },
             ),
             ListTile(

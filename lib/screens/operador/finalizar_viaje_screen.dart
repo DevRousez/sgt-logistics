@@ -13,6 +13,7 @@ import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
 import '/config/api_config.dart';
 import '../../utils/file_downloader.dart';
+import '../../services/operador_sync_service.dart';
 
 class FinalizarViajeScreen extends StatefulWidget {
   const FinalizarViajeScreen({super.key});
@@ -161,11 +162,21 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
     });
 
     try {
-      final data = await ApiService.getUserData();
+      Map<String, dynamic>? data = await ApiService.getUserData();
+      final int? asigId = int.tryParse(data?["id_asignacion"]?.toString() ?? "");
+      final String? numCont = data?["num_contenedor"]?.toString();
+
+      if (asigId == null || numCont == null || numCont.isEmpty || numCont == "N/A") {
+        final synced = await OperadorSyncService.sincronizarSiEsNecesario();
+        if (synced != null) {
+          data = synced;
+        }
+      }
+
       if (data != null && mounted) {
         setState(() {
           _operatorData = data;
-          _numContenedor = data["num_contenedor"]?.toString() ?? "N/A";
+          _numContenedor = data!["num_contenedor"]?.toString() ?? "N/A";
           _unidad = data["unidad"]?.toString() ?? "N/A";
           final dynamic asigId = data["id_asignacion"];
           _idAsignacion = int.tryParse(asigId?.toString() ?? "");
@@ -379,24 +390,23 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setBool('viaje_finalizado_$_idAsignacion', true);
           }
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("¡Entrega y conclusión de viaje registradas con éxito!"),
-              backgroundColor: Colors.green,
-            ),
-          );
-          setState(() {
-            _yaRegistrado = true;
-          });
 
           final data = await ApiService.getUserData() ?? {};
-
           data["id_asignacion"] = null;
           data["num_contenedor"] = "N/A";
           data["unidad"] = "N/A";
           data["id_equipo"] = "N/A";
-
           await ApiService.saveUserData(data);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("¡Entrega y conclusión de viaje registradas con éxito!"),
+                backgroundColor: Colors.green,
+              ),
+            );
+            Navigator.pop(context);
+          }
         } else {
           _mostrarErrorEnvio(errorDetails: "HTTP ${response.statusCode}: ${response.body}");
         }
@@ -712,43 +722,7 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                               ),
                             ),
                           ],
-                        const SizedBox(height: 25),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 50,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.archive),
-                            label: const Text(
-                              "Cerrar y mover a historial",
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade900,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            onPressed: () async {
-                              final data = await ApiService.getUserData() ?? {};
-                              data["id_asignacion"] = null;
-                              data["num_contenedor"] = "N/A";
-                              data["unidad"] = "N/A";
-                              data["id_equipo"] = "N/A";
-                              await ApiService.saveUserData(data);
 
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text("Viaje archivado y asignación liberada."),
-                                    backgroundColor: Colors.green,
-                                  ),
-                                );
-                                Navigator.pop(context);
-                              }
-                            },
-                          ),
-                        ),
                         ],
                       ),
                     ),
