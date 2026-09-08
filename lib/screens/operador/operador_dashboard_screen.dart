@@ -129,9 +129,19 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
           final String viajeOrigenDestino = assignment["origen_destino"]?.toString() ?? "";
           final String numContenedor = assignment["num_contenedor"]?.toString() ?? "N/A";
           final String camionUnidad = assignment["camion"]?.toString() ?? "N/A";
+          final String fechaInicio = assignment["fecha_inicio"]?.toString() ?? "";
+          final String fechaFin = assignment["fecha_fin"]?.toString() ?? "";
 
           if (idAsig != null && mounted && !_isDialogOpen) {
-            _showAssignmentDialog(idAsig, empresaNombre, viajeOrigenDestino, numContenedor, camionUnidad);
+            _showAssignmentDialog(
+              idAsig,
+              empresaNombre,
+              viajeOrigenDestino,
+              numContenedor,
+              camionUnidad,
+              fechaInicio: fechaInicio,
+              fechaFin: fechaFin,
+            );
           }
         }
       }
@@ -140,10 +150,32 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
     }
   }
 
-  void _showAssignmentDialog(int idAsignacion, String empresaNombre, String detallesViaje, String numContenedor, String camionUnidad) {
+  void _showAssignmentDialog(
+    int idAsignacion,
+    String empresaNombre,
+    String detallesViaje,
+    String numContenedor,
+    String camionUnidad, {
+    String? fechaInicio,
+    String? fechaFin,
+  }) {
     setState(() {
       _isDialogOpen = true;
     });
+
+    String formatFecha(String? raw) {
+      if (raw == null || raw.trim().isEmpty) return "N/A";
+      try {
+        final dt = DateTime.parse(raw).toLocal();
+        return "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}";
+      } catch (_) {
+        return raw;
+      }
+    }
+
+    final fInicioFormatted = formatFecha(fechaInicio);
+    final fFinFormatted = formatFecha(fechaFin);
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -156,12 +188,32 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
               Text("Nueva Asignación"),
             ],
           ),
-          content: Text(
-            "Has sido asignado a la empresa: $empresaNombre.\n\n"
-            "Contenedor: $numContenedor\n"
-            "Unidad/Camión: $camionUnidad\n"
-            "Ruta: $detallesViaje\n\n"
-            "¿Aceptas esta asignación para comenzar a capturar datos?",
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Has sido asignado a la empresa: $empresaNombre.",
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Text("• Contenedor: $numContenedor"),
+                const SizedBox(height: 4),
+                Text("• Unidad/Camión: $camionUnidad"),
+                const SizedBox(height: 4),
+                Text("• Ruta: $detallesViaje"),
+                const SizedBox(height: 4),
+                Text("• Fecha Inicio: $fInicioFormatted"),
+                const SizedBox(height: 4),
+                Text("• Fecha Fin: $fFinFormatted"),
+                const SizedBox(height: 16),
+                const Text(
+                  "¿Aceptas esta asignación para comenzar a capturar datos?",
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -700,7 +752,8 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
                     builder: (_) => const FinalizarViajeScreen(),
                   ),
                 );
-                _loadOperatorData();
+                await _loadOperatorData();
+                await _checkPendingAssignment();
               },
             ),
             ListTile(

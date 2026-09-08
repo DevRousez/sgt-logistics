@@ -28,16 +28,17 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
   bool _isLoading = false;
   String _rawResponseData = "";
 
-  String _buildImageUrl(String path) {
+  String _buildImageUrl(String path, {String defaultFolder = 'entrega_contenedor'}) {
     if (path.isEmpty) return "";
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return path;
     }
     final cleanBaseUrl = ApiConfig.baseUrl.replaceAll('/api', '');
-    if (path.contains('uploads/')) {
-      return "$cleanBaseUrl/$path";
+    String cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    if (cleanPath.contains('uploads/')) {
+      return "$cleanBaseUrl/$cleanPath";
     }
-    return "$cleanBaseUrl/uploads/entrega_contenedor/$_idAsignacion/$path";
+    return "$cleanBaseUrl/uploads/$defaultFolder/$_idAsignacion/$cleanPath";
   }
 
   Future<void> _descargarYVerArchivo(BuildContext context, String url, String fileName) async {
@@ -86,6 +87,11 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
   bool _validandoEstatus = true;
   List<String> _fotosGuardadas = [];
   
+  bool _aperturaRegistrada = false;
+  List<String> _fotosAperturaGuardadas = [];
+  final List<XFile> _photosApertura = [];
+  bool _isLoadingApertura = false;
+
   String? _gpsCoordinates;
   double? _latitude;
   double? _longitude;
@@ -185,6 +191,7 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
         if (_idAsignacion != null) {
           final prefs = await SharedPreferences.getInstance();
           final localKey = 'viaje_finalizado_$_idAsignacion';
+          final localKeyApertura = 'apertura_registrada_$_idAsignacion';
 
           try {
             final response = await ApiService.post(
@@ -197,10 +204,12 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
               if (resData["data"] != null) {
                 final dataObj = resData["data"];
                 final bool finished = dataObj["viaje_finalizado"] == true;
+                final bool aperturaDone = dataObj["apertura_registrada"] == true;
                 
                 await prefs.setBool(localKey, finished);
+                await prefs.setBool(localKeyApertura, aperturaDone);
 
-                 List<String> parsedFotos = [];
+                List<String> parsedFotos = [];
                 if (finished) {
                   final dynamic rawFotos = dataObj["fotos_fin"] ?? dataObj["fotos_entrega"] ?? dataObj["evidencias_entrega"] ?? dataObj["fotos"];
                   if (rawFotos is List) {
@@ -219,10 +228,29 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                   }
                 }
 
+                List<String> parsedFotosApertura = [];
+                final dynamic rawFotosApertura = dataObj["fotos_apertura"];
+                if (rawFotosApertura is List) {
+                  parsedFotosApertura = List<String>.from(rawFotosApertura.map((e) => e.toString()));
+                } else if (rawFotosApertura is String && rawFotosApertura.isNotEmpty) {
+                  try {
+                    final decoded = jsonDecode(rawFotosApertura);
+                    if (decoded is List) {
+                      parsedFotosApertura = List<String>.from(decoded.map((e) => e.toString()));
+                    } else {
+                      parsedFotosApertura = [rawFotosApertura];
+                    }
+                  } catch (_) {
+                    parsedFotosApertura = [rawFotosApertura];
+                  }
+                }
+
                 setState(() {
                   _rawResponseData = response.body;
                   _yaRegistrado = finished;
                   _fotosGuardadas = parsedFotos;
+                  _aperturaRegistrada = aperturaDone;
+                  _fotosAperturaGuardadas = parsedFotosApertura;
                 });
               }
             } else {
@@ -230,6 +258,11 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
               if (prefs.getBool(localKey) == true) {
                 setState(() {
                   _yaRegistrado = true;
+                });
+              }
+              if (prefs.getBool(localKeyApertura) == true) {
+                setState(() {
+                  _aperturaRegistrada = true;
                 });
               }
             }
@@ -241,10 +274,18 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                 _yaRegistrado = true;
               });
             }
+            if (prefs.getBool(localKeyApertura) == true) {
+              setState(() {
+                _aperturaRegistrada = true;
+              });
+            }
           }
 
           if (!_yaRegistrado) {
             await _cargarBorradorLocal();
+          }
+          if (!_aperturaRegistrada) {
+            await _cargarBorradorLocalApertura();
           }
         }
       }
@@ -304,6 +345,147 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('draft_finalizar_$_idAsignacion');
     } catch (_) {}
+  }
+
+  Future<void> _guardarBorradorLocalApertura() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draft = {
+        'photo_paths': _photosApertura.map((e) => e.path).toList(),
+        'latitud': _latitude,
+        'longitud': _longitude,
+      };
+      await prefs.setString('draft_apertura_$_idAsignacion', jsonEncode(draft));
+    } catch (_) {}
+  }
+
+  Future<void> _cargarBorradorLocalApertura() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draftStr = prefs.getString('draft_apertura_$_idAsignacion');
+      if (draftStr != null && !_aperturaRegistrada) {
+        final draft = jsonDecode(draftStr) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            if (_latitude == null && draft['latitud'] != null) {
+              _latitude = double.tryParse(draft['latitud'].toString());
+              _longitude = double.tryParse(draft['longitud'].toString());
+            }
+            if (_photosApertura.isEmpty && draft['photo_paths'] != null) {
+              for (var p in (draft['photo_paths'] as List)) {
+                if (File(p.toString()).existsSync()) {
+                  _photosApertura.add(XFile(p.toString()));
+                }
+              }
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _limpiarBorradorLocalApertura() async {
+    if (_idAsignacion == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('draft_apertura_$_idAsignacion');
+    } catch (_) {}
+  }
+
+  Future<void> _pickGalleryImagesApertura() async {
+    try {
+      final pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 1280,
+        maxHeight: 720,
+        imageQuality: 70,
+      );
+      if (pickedFiles.isNotEmpty && mounted) {
+        setState(() {
+          _photosApertura.addAll(pickedFiles);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al seleccionar fotos de galería: $e")),
+      );
+    }
+  }
+
+  Future<void> _enviarAperturaContenedor() async {
+    if (_photosApertura.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Debes anexar al menos 1 foto de evidencia de la apertura de contenedor."),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoadingApertura = true;
+    });
+
+    List<String> imagesBase64 = [];
+    try {
+      for (var file in _photosApertura) {
+        final bytes = await file.readAsBytes();
+        imagesBase64.add(base64Encode(bytes));
+      }
+    } catch (e) {
+      print("Error encoding apertura images: $e");
+    }
+
+    final Map<String, dynamic> body = {
+      "id_asignacion": _idAsignacion,
+      "fotos_base64": imagesBase64,
+      "latitud": _latitude,
+      "longitud": _longitude,
+    };
+
+    await _guardarBorradorLocalApertura();
+
+    try {
+      final response = await ApiService.post(
+        ApiEndpoints.aperturaContenedor,
+        body,
+      );
+
+      if (mounted) {
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          await _limpiarBorradorLocalApertura();
+          if (_idAsignacion != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('apertura_registrada_$_idAsignacion', true);
+          }
+
+          setState(() {
+            _aperturaRegistrada = true;
+          });
+
+          await _loadOperatorInfo();
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("¡Apertura de contenedor registrada con éxito! Ahora puedes concluir el viaje."),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          _mostrarErrorEnvio(errorDetails: "HTTP ${response.statusCode}: ${response.body}");
+        }
+      }
+    } catch (e) {
+      _mostrarErrorEnvio(errorDetails: e.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingApertura = false;
+        });
+      }
+    }
   }
 
   Future<void> _pickGalleryImages() async {
@@ -386,9 +568,12 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
 
         if (response.statusCode == 200 || response.statusCode == 201) {
           await _limpiarBorradorLocal();
+          await _limpiarBorradorLocalApertura();
           if (_idAsignacion != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setBool('viaje_finalizado_$_idAsignacion', true);
+            await prefs.remove('draft_finalizar_$_idAsignacion');
+            await prefs.remove('draft_apertura_$_idAsignacion');
           }
 
           final data = await ApiService.getUserData() ?? {};
@@ -405,7 +590,7 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                 backgroundColor: Colors.green,
               ),
             );
-            Navigator.pop(context);
+            Navigator.pop(context, true);
           }
         } else {
           _mostrarErrorEnvio(errorDetails: "HTTP ${response.statusCode}: ${response.body}");
@@ -759,105 +944,418 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 25),
+                      const SizedBox(height: 20),
 
-                      const Text(
-                        "Comprobante o Evidencia de Entrega (Opcional)",
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-
-                      if (_photos.isNotEmpty)
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
+                      // SECCIÓN 1: APERTURA DE CONTENEDOR
+                      if (_aperturaRegistrada)
+                        Card(
+                          elevation: 1,
+                          color: Colors.green.shade50,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: Colors.green.shade200),
                           ),
-                          itemCount: _photos.length + 1,
-                          itemBuilder: (context, index) {
-                            if (index == _photos.length) {
-                              return GestureDetector(
-                                onTap: _pickGalleryImages,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.blue.shade800, width: 1.5),
-                                    borderRadius: BorderRadius.circular(12),
-                                    color: Colors.blue.shade50,
-                                  ),
-                                  child: Icon(Icons.add_photo_alternate, color: Colors.blue.shade800, size: 28),
+                          clipBehavior: Clip.antiAlias,
+                          child: ExpansionTile(
+                            initiallyExpanded: false,
+                            leading: const Icon(Icons.check_circle, color: Colors.green, size: 28),
+                            title: const Text(
+                              "Apertura de Contenedor (Registrado)",
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.green),
+                            ),
+                            subtitle: const Text(
+                              "Toca para expandir y ver las evidencias registradas",
+                              style: TextStyle(fontSize: 12, color: Colors.black54),
+                            ),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_fotosAperturaGuardadas.isNotEmpty) ...[
+                                      const Text(
+                                        "Evidencias de Apertura:",
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      SizedBox(
+                                        height: 110,
+                                        child: ListView.builder(
+                                          scrollDirection: Axis.horizontal,
+                                          itemCount: _fotosAperturaGuardadas.length,
+                                          itemBuilder: (context, index) {
+                                            final rawPath = _fotosAperturaGuardadas[index];
+                                            final imgUrl = _buildImageUrl(rawPath, defaultFolder: 'apertura_contenedor');
+                                            return Padding(
+                                              padding: const EdgeInsets.only(right: 10),
+                                              child: Stack(
+                                                children: [
+                                                  ClipRRect(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: Image.network(
+                                                      imgUrl,
+                                                      width: 100,
+                                                      height: 100,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder: (c, o, s) => Container(
+                                                        width: 100,
+                                                        height: 100,
+                                                        color: Colors.grey.shade200,
+                                                        child: const Icon(Icons.broken_image),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Positioned(
+                                                    right: 2,
+                                                    bottom: 2,
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black.withOpacity(0.6),
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                      child: IconButton(
+                                                        constraints: const BoxConstraints(),
+                                                        padding: const EdgeInsets.all(4),
+                                                        icon: const Icon(Icons.download, color: Colors.white, size: 14),
+                                                        onPressed: () {
+                                                          FileDownloader.downloadFile(
+                                                            context: context,
+                                                            url: imgUrl,
+                                                            fileName: "apertura_${index + 1}.jpg",
+                                                          );
+                                                        },
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ] else ...[
+                                      const Text(
+                                        "Información de apertura enviada correctamente al servidor.",
+                                        style: TextStyle(color: Colors.black54, fontSize: 13),
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                              );
-                            }
-                            return Stack(
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Card(
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Positioned.fill(
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: kIsWeb
-                                        ? Image.network(_photos[index].path, fit: BoxFit.cover)
-                                        : Image.file(File(_photos[index].path), fit: BoxFit.cover),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 4,
-                                  right: 4,
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _photos.removeAt(index);
-                                      });
-                                    },
-                                    child: const CircleAvatar(
-                                      radius: 12,
-                                      backgroundColor: Colors.red,
-                                      child: Icon(Icons.close, color: Colors.white, size: 16),
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.shade100,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(Icons.lock_open, color: Colors.orange.shade900, size: 24),
                                     ),
+                                    const SizedBox(width: 12),
+                                    const Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            "Etapa 1: Apertura de Contenedor",
+                                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                          ),
+                                          SizedBox(height: 2),
+                                          Text(
+                                            "Anexa evidencias fotográficas de la apertura.",
+                                            style: TextStyle(color: Colors.black54, fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const Divider(height: 24),
+                                if (_photosApertura.isNotEmpty)
+                                  GridView.builder(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: 3,
+                                      crossAxisSpacing: 10,
+                                      mainAxisSpacing: 10,
+                                    ),
+                                    itemCount: _photosApertura.length + 1,
+                                    itemBuilder: (context, index) {
+                                      if (index == _photosApertura.length) {
+                                        return GestureDetector(
+                                          onTap: _pickGalleryImagesApertura,
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: Colors.orange.shade800, width: 1.5),
+                                              borderRadius: BorderRadius.circular(12),
+                                              color: Colors.orange.shade50,
+                                            ),
+                                            child: Icon(Icons.add_photo_alternate, color: Colors.orange.shade800, size: 28),
+                                          ),
+                                        );
+                                      }
+                                      return Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(12),
+                                              child: kIsWeb
+                                                  ? Image.network(_photosApertura[index].path, fit: BoxFit.cover)
+                                                  : Image.file(File(_photosApertura[index].path), fit: BoxFit.cover),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                setState(() {
+                                                  _photosApertura.removeAt(index);
+                                                });
+                                              },
+                                              child: const CircleAvatar(
+                                                radius: 12,
+                                                backgroundColor: Colors.red,
+                                                child: Icon(Icons.close, color: Colors.white, size: 16),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  )
+                                else
+                                  SizedBox(
+                                    width: double.infinity,
+                                    height: 90,
+                                    child: OutlinedButton.icon(
+                                      onPressed: _pickGalleryImagesApertura,
+                                      icon: const Icon(Icons.photo_camera, size: 26),
+                                      label: const Text("Anexar Fotos de Apertura", style: TextStyle(fontSize: 14)),
+                                      style: OutlinedButton.styleFrom(
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        side: BorderSide(color: Colors.orange.shade800, width: 1.5),
+                                        foregroundColor: Colors.orange.shade800,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 20),
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 50,
+                                  child: ElevatedButton.icon(
+                                    icon: _isLoadingApertura
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                          )
+                                        : const Icon(Icons.send),
+                                    label: Text(_isLoadingApertura ? "Guardando..." : "Enviar Apertura de Contenedor"),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange.shade800,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    onPressed: _isLoadingApertura ? null : _enviarAperturaContenedor,
                                   ),
                                 ),
                               ],
-                            );
-                          },
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 20),
+
+                      // SECCIÓN 2: CONCLUIR VIAJE
+                      if (!_aperturaRegistrada)
+                        Card(
+                          elevation: 1,
+                          color: Colors.grey.shade100,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          child: const Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                Icon(Icons.lock, color: Colors.grey, size: 28),
+                                SizedBox(width: 15),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        "Etapa 2: Concluir Viaje",
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey),
+                                      ),
+                                      SizedBox(height: 4),
+                                      Text(
+                                        "Para habilitar este paso, debes registrar primero la 'Apertura de Contenedor'.",
+                                        style: TextStyle(color: Colors.grey, fontSize: 13),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         )
                       else
-                        SizedBox(
-                          width: double.infinity,
-                          height: 100,
-                          child: OutlinedButton.icon(
-                            onPressed: _pickGalleryImages,
-                            icon: const Icon(Icons.photo_library, size: 28),
-                            label: const Text("Seleccionar Fotos de Galería", style: TextStyle(fontSize: 15)),
-                            style: OutlinedButton.styleFrom(
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              side: BorderSide(color: Colors.blue.shade800, width: 1.5),
-                              foregroundColor: Colors.blue.shade800,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 35),
+                        Card(
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade100,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(Icons.check_circle_outline, color: Colors.blue.shade800, size: 24),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    const Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            "Etapa 2: Concluir Viaje",
+                                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                          ),
+                                          SizedBox(height: 2),
+                                          Text(
+                                            "Sube las fotos de contenedor vacío y formato firmado.",
+                                            style: TextStyle(color: Colors.black54, fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const Divider(height: 24),
 
-                      SizedBox(
-                        width: double.infinity,
-                        height: 55,
-                        child: ElevatedButton.icon(
-                          icon: _isLoading 
-                              ? const CircularProgressIndicator(color: Colors.white)
-                              : const Icon(Icons.check_circle_outline),
-                          label: Text(_isLoading ? "Concluyendo..." : "Concluir Viaje"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red.shade800,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                                if (_photos.isNotEmpty)
+                                  GridView.builder(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: 3,
+                                      crossAxisSpacing: 10,
+                                      mainAxisSpacing: 10,
+                                    ),
+                                    itemCount: _photos.length + 1,
+                                    itemBuilder: (context, index) {
+                                      if (index == _photos.length) {
+                                        return GestureDetector(
+                                          onTap: _pickGalleryImages,
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: Colors.blue.shade800, width: 1.5),
+                                              borderRadius: BorderRadius.circular(12),
+                                              color: Colors.blue.shade50,
+                                            ),
+                                            child: Icon(Icons.add_photo_alternate, color: Colors.blue.shade800, size: 28),
+                                          ),
+                                        );
+                                      }
+                                      return Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(12),
+                                              child: kIsWeb
+                                                  ? Image.network(_photos[index].path, fit: BoxFit.cover)
+                                                  : Image.file(File(_photos[index].path), fit: BoxFit.cover),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                setState(() {
+                                                  _photos.removeAt(index);
+                                                });
+                                              },
+                                              child: const CircleAvatar(
+                                                radius: 12,
+                                                backgroundColor: Colors.red,
+                                                child: Icon(Icons.close, color: Colors.white, size: 16),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  )
+                                else
+                                  SizedBox(
+                                    width: double.infinity,
+                                    height: 100,
+                                    child: OutlinedButton.icon(
+                                      onPressed: _pickGalleryImages,
+                                      icon: const Icon(Icons.photo_library, size: 28),
+                                      label: const Text("Seleccionar Fotos de Galería", style: TextStyle(fontSize: 15)),
+                                      style: OutlinedButton.styleFrom(
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        side: BorderSide(color: Colors.blue.shade800, width: 1.5),
+                                        foregroundColor: Colors.blue.shade800,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 25),
+
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 55,
+                                  child: ElevatedButton.icon(
+                                    icon: _isLoading 
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                          )
+                                        : const Icon(Icons.check_circle_outline),
+                                    label: Text(_isLoading ? "Concluyendo..." : "Concluir Viaje"),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red.shade800,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    onPressed: _isLoading ? null : _finalizarViaje,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          onPressed: _isLoading ? null : _finalizarViaje,
                         ),
-                      ),
                     ],
                   ),
           ],

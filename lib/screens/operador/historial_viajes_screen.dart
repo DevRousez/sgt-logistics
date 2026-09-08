@@ -78,21 +78,26 @@ class _HistorialViajesScreenState extends State<HistorialViajesScreen> {
     }
   }
 
-  String _buildImageUrl(String path, int idAsignacion, String type) {
+  String _buildImageUrl(String rawPath, int idAsignacion, String type) {
+    if (rawPath.isEmpty) return "";
+    String path = rawPath.replaceAll('"', '').replaceAll('[', '').replaceAll(']', '').trim();
     if (path.isEmpty) return "";
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return path;
     }
     final cleanBaseUrl = ApiConfig.baseUrl.replaceAll('/api', '');
-    if (path.contains('uploads/')) {
-      return "$cleanBaseUrl/$path";
+    String cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    if (cleanPath.contains('uploads/')) {
+      return "$cleanBaseUrl/$cleanPath";
     }
     if (type == 'diesel') {
-      return "$cleanBaseUrl/uploads/diesel/$idAsignacion/$path";
+      return "$cleanBaseUrl/uploads/diesel/$idAsignacion/$cleanPath";
     } else if (type == 'carga') {
-      return "$cleanBaseUrl/uploads/carga_contenedor/$idAsignacion/$path";
+      return "$cleanBaseUrl/uploads/carga_contenedor/$idAsignacion/$cleanPath";
+    } else if (type == 'apertura') {
+      return "$cleanBaseUrl/uploads/apertura_contenedor/$idAsignacion/$cleanPath";
     } else {
-      return "$cleanBaseUrl/uploads/entrega_contenedor/$idAsignacion/$path";
+      return "$cleanBaseUrl/uploads/entrega_contenedor/$idAsignacion/$cleanPath";
     }
   }
 
@@ -125,16 +130,21 @@ class _HistorialViajesScreenState extends State<HistorialViajesScreen> {
   List<String> _parsePhotos(dynamic photosRaw) {
     if (photosRaw == null) return [];
     if (photosRaw is List) {
-      return List<String>.from(photosRaw.map((e) => e.toString()));
+      return List<String>.from(photosRaw.map((e) => e.toString().replaceAll('"', '').replaceAll('[', '').replaceAll(']', '').trim()).where((e) => e.isNotEmpty));
     }
     if (photosRaw is String && photosRaw.isNotEmpty) {
+      final str = photosRaw.trim();
+      if (str.isEmpty) return [];
       try {
-        final decoded = jsonDecode(photosRaw);
+        final decoded = jsonDecode(str);
         if (decoded is List) {
-          return List<String>.from(decoded.map((e) => e.toString()));
+          return List<String>.from(decoded.map((e) => e.toString().replaceAll('"', '').replaceAll('[', '').replaceAll(']', '').trim()).where((e) => e.isNotEmpty));
         }
       } catch (e) {
-        return [photosRaw];
+        final clean = str.replaceAll('"', '').replaceAll('[', '').replaceAll(']', '').trim();
+        if (clean.isNotEmpty) {
+          return [clean];
+        }
       }
     }
     return [];
@@ -339,6 +349,8 @@ class _HistorialViajesScreenState extends State<HistorialViajesScreen> {
                                     final double? lngDiesel = double.tryParse(trip["longitud"]?.toString() ?? "");
                                     final double? latCarga = double.tryParse(trip["latitud_carga"]?.toString() ?? "");
                                     final double? lngCarga = double.tryParse(trip["longitud_carga"]?.toString() ?? "");
+                                    final double? latApertura = double.tryParse(trip["latitud_apertura"]?.toString() ?? "");
+                                    final double? lngApertura = double.tryParse(trip["longitud_apertura"]?.toString() ?? "");
                                     final double? latFin = double.tryParse(trip["latitud_fin"]?.toString() ?? "");
                                     final double? lngFin = double.tryParse(trip["longitud_fin"]?.toString() ?? "");
 
@@ -358,10 +370,11 @@ class _HistorialViajesScreenState extends State<HistorialViajesScreen> {
                                           const SizedBox(height: 15),
                                           const Text("1. Registro de Diésel", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
                                           const SizedBox(height: 4),
-                                          if (trip["fecha_carga_diesel"] != null) ...[
+                                          if (trip["fecha_carga_diesel"] != null || trip["litros"] != null || trip["costo"] != null || _parsePhotos(trip["comprobante"]).isNotEmpty) ...[
                                             Text("Litros: ${trip["litros"] ?? '0'} L | Costo: \$${trip["costo"] ?? '0'}"),
                                             Text("Odómetro: ${trip["odometro"] ?? '0'} km"),
-                                            Text("Fecha Envío: ${_formatDateTime(trip["fecha_carga_diesel"])}"),
+                                            if (trip["fecha_carga_diesel"] != null)
+                                              Text("Fecha Envío: ${_formatDateTime(trip["fecha_carga_diesel"])}"),
                                             if (latDiesel != null && lngDiesel != null)
                                               TextButton.icon(
                                                 icon: const Icon(Icons.map, size: 16),
@@ -369,20 +382,19 @@ class _HistorialViajesScreenState extends State<HistorialViajesScreen> {
                                                 onPressed: () => _openMap(latDiesel, lngDiesel),
                                               ),
                                             const SizedBox(height: 6),
-                                            if (trip["comprobante"] != null && trip["comprobante"].toString().isNotEmpty)
-                                              _buildEvidencesGrid([trip["comprobante"].toString()], idAsig, 'diesel'),
+                                            _buildEvidencesGrid(_parsePhotos(trip["comprobante"]), idAsig, 'diesel'),
                                           ] else
                                             const Text("No registrado", style: TextStyle(color: Colors.grey, fontSize: 13)),
 
                                           const SizedBox(height: 15),
                                           const Text("2. Registro de Urea", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
                                           const SizedBox(height: 4),
-                                          if (trip["fecha_carga_urea"] != null) ...[
+                                          if (trip["fecha_carga_urea"] != null || trip["litros_urea"] != null || trip["costo_urea"] != null || _parsePhotos(trip["comprobante_urea"]).isNotEmpty) ...[
                                             Text("Litros: ${trip["litros_urea"] ?? '0'} L | Costo: \$${trip["costo_urea"] ?? '0'}"),
-                                            Text("Fecha Envío: ${_formatDateTime(trip["fecha_carga_urea"])}"),
+                                            if (trip["fecha_carga_urea"] != null)
+                                              Text("Fecha Envío: ${_formatDateTime(trip["fecha_carga_urea"])}"),
                                             const SizedBox(height: 6),
-                                            if (trip["comprobante_urea"] != null && trip["comprobante_urea"].toString().isNotEmpty)
-                                              _buildEvidencesGrid([trip["comprobante_urea"].toString()], idAsig, 'diesel'),
+                                            _buildEvidencesGrid(_parsePhotos(trip["comprobante_urea"]), idAsig, 'diesel'),
                                           ] else
                                             const Text("No registrado", style: TextStyle(color: Colors.grey, fontSize: 13)),
 
@@ -403,20 +415,75 @@ class _HistorialViajesScreenState extends State<HistorialViajesScreen> {
                                             const Text("No registrado", style: TextStyle(color: Colors.grey, fontSize: 13)),
 
                                           const SizedBox(height: 15),
-                                          const Text("4. Conclusión de Viaje", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-                                          const SizedBox(height: 4),
-                                          if (trip["viaje_finalizado"] != null) ...[
-                                            Text("Fecha Envío: ${_formatDateTime(trip["viaje_finalizado"])}"),
-                                            if (latFin != null && lngFin != null)
-                                              TextButton.icon(
-                                                icon: const Icon(Icons.map, size: 16),
-                                                label: Text("GPS: $latFin, $lngFin"),
-                                                onPressed: () => _openMap(latFin, lngFin),
-                                              ),
-                                            const SizedBox(height: 6),
-                                            _buildEvidencesGrid(_parsePhotos(trip["fotos_fin"]), idAsig, 'entrega'),
-                                          ] else
-                                            const Text("No registrado", style: TextStyle(color: Colors.grey, fontSize: 13)),
+                                          const Text("4. Conclusión de Viaje", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 15)),
+                                          const SizedBox(height: 6),
+                                          
+                                          // 4.1 Apertura de Contenedor
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.all(10),
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange.shade50,
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: Colors.orange.shade200),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                const Text(
+                                                  "Etapa 1: Apertura de Contenedor",
+                                                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange, fontSize: 13),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                if (trip["apertura_contenedor"] != null) ...[
+                                                  Text("Fecha Envío: ${_formatDateTime(trip["apertura_contenedor"])}", style: const TextStyle(fontSize: 12)),
+                                                  if (latApertura != null && lngApertura != null)
+                                                    TextButton.icon(
+                                                      icon: const Icon(Icons.map, size: 16),
+                                                      label: Text("GPS: $latApertura, $lngApertura"),
+                                                      onPressed: () => _openMap(latApertura, lngApertura),
+                                                    ),
+                                                  const SizedBox(height: 6),
+                                                  _buildEvidencesGrid(_parsePhotos(trip["fotos_apertura"]), idAsig, 'apertura'),
+                                                ] else
+                                                  const Text("No registrado", style: TextStyle(color: Colors.grey, fontSize: 13)),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+
+                                          // 4.2 Entrega / Finalización de Viaje
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.all(10),
+                                            decoration: BoxDecoration(
+                                              color: Colors.blue.shade50,
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: Colors.blue.shade200),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                const Text(
+                                                  "Etapa 2: Contenedor Vacío y Formato Firmado",
+                                                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 13),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                if (trip["viaje_finalizado"] != null) ...[
+                                                  Text("Fecha Envío: ${_formatDateTime(trip["viaje_finalizado"])}", style: const TextStyle(fontSize: 12)),
+                                                  if (latFin != null && lngFin != null)
+                                                    TextButton.icon(
+                                                      icon: const Icon(Icons.map, size: 16),
+                                                      label: Text("GPS: $latFin, $lngFin"),
+                                                      onPressed: () => _openMap(latFin, lngFin),
+                                                    ),
+                                                  const SizedBox(height: 6),
+                                                  _buildEvidencesGrid(_parsePhotos(trip["fotos_fin"]), idAsig, 'entrega'),
+                                                ] else
+                                                  const Text("No registrado", style: TextStyle(color: Colors.grey, fontSize: 13)),
+                                              ],
+                                            ),
+                                          ),
                                           
                                           // 5. Gastos Registrados en el Viaje
                                           const SizedBox(height: 15),

@@ -17,6 +17,7 @@ class ApiEndpoints {
   static String get infoViaje => "${ApiConfig.baseUrl}/dashboard/info-viaje";
   static String get finalizarViaje => "${ApiConfig.baseUrl}/dashboard/finalizar-viaje";
   static String get iniciarViaje => "${ApiConfig.baseUrl}/operador/iniciar-viaje";
+  static String get aperturaContenedor => "${ApiConfig.baseUrl}/operador/apertura-contenedor";
   static String get estatusFlujo => "${ApiConfig.baseUrl}/operador/estatus-flujo";
   static String get guardarCoordenadas => "${ApiConfig.baseUrl}/operador/coordenadas";
   static String get finalizarViajeOperador => "${ApiConfig.baseUrl}/operador/finalizar-viaje";
