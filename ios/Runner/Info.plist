@@ -46,9 +46,7 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 
-	<!-- Permisos para Cámara y Galería (image_picker) -->
-	<key>NSCameraUsageDescription</key>
-	<string>Esta aplicación requiere acceso a la cámara para capturar evidencias de viaje, firmas y comprobantes.</string>
+	<!-- Permisos para Galería de Fotos (image_picker) -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Esta aplicación requiere acceso a la galería para adjuntar comprobantes y fotografías del viaje.</string>
 

@@ -3,9 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiConfig {
   // Define si la aplicación está en entorno de producción.
   // Si está en true, se oculta la configuración del host y se usa la URL de producción.
-  static const bool isProduction = true;
+  static const bool isProduction = false;
 
-  static String baseUrl = "https://sgt.gologipro.com/api";
+  static String baseUrl = "https://demo.gologipro.com/api";
 
   static Future<void> loadConfig() async {
     if (isProduction) {
