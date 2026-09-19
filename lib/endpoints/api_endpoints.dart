@@ -29,5 +29,7 @@ class ApiEndpoints {
   static String get obtenerGastosViaje => "${ApiConfig.baseUrl}/operador/obtener-gastos-viaje";
   static String get eliminarGastoViaje => "${ApiConfig.baseUrl}/operador/eliminar-gasto-viaje";
   static String get notificationConfig => "${ApiConfig.baseUrl}/operador/notification-config";
+  static String get reporteViaticosPdf => "${ApiConfig.baseUrl}/operador/reporte-viaticos-pdf";
+  static String get appVersionCheck => "${ApiConfig.baseUrl}/app/version-check";
   static String get appLogs => "${ApiConfig.baseUrl}/app-logs";
 }
