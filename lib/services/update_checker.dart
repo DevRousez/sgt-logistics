@@ -133,13 +133,21 @@ class UpdateChecker {
               ElevatedButton.icon(
                 onPressed: () async {
                   if (apkUrl.isNotEmpty) {
-                    final Uri uri = Uri.parse(apkUrl);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    } else {
-                      if (context.mounted) {
+                    try {
+                      final Uri uri = Uri.parse(apkUrl);
+                      bool launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      if (!launched) {
+                        launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
+                      }
+                      if (!launched && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text("No se pudo abrir el enlace: $apkUrl")),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("Error al abrir descarga: $e")),
                         );
                       }
                     }
