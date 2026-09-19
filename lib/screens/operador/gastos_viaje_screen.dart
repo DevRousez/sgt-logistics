@@ -415,128 +415,34 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
     );
 
     try {
-      double totalGeneral = 0.0;
-      List<Map<String, dynamic>> reporteData = [];
-
-      // Fetch expenses for all pending trips in parallel
-      final List<Future<http.Response>> requests = _viajes.map((viaje) {
-        final idAsig = viaje["id_asignacion"];
-        return ApiService.get("${ApiEndpoints.obtenerGastosViaje}/$idAsig");
-      }).toList();
-
-      final List<http.Response> responses = await Future.wait(requests);
-
-      for (int i = 0; i < _viajes.length; i++) {
-        final viaje = _viajes[i];
-        final response = responses[i];
-        final String numContenedor = viaje["num_contenedor"]?.toString() ?? "Sin Contenedor";
-        final String ref = viaje["referencia_full"]?.toString() ?? "";
-
-        List<Map<String, dynamic>> gastos = [];
-        if (response.statusCode == 200) {
-          final resData = jsonDecode(response.body);
-          if (resData["success"] == true && resData["data"] != null) {
-            final List<dynamic> list = resData["data"];
-            for (var item in list) {
-              final String concepto = item["concepto"] ?? "Sin Concepto";
-              final double monto = double.tryParse(item["monto"]?.toString() ?? "0") ?? 0.0;
-              gastos.add({"concepto": concepto, "monto": monto});
-              totalGeneral += monto;
-            }
-          }
-        }
-
-        reporteData.add({
-          "num_contenedor": numContenedor,
-          "referencia": ref,
-          "gastos": gastos,
-        });
-      }
-
-
-      final pdf = pw.Document();
-
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          build: (pw.Context context) {
-            return [
-              pw.Header(
-                level: 0,
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('Reporte de Viaticos - Sita App', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
-                    pw.Text(DateTime.now().toString().substring(0, 10), style: const pw.TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-              ...reporteData.map((data) {
-                final String contenedor = data["num_contenedor"];
-                final String referencia = data["referencia"];
-                final List<dynamic> gastos = data["gastos"];
-
-                return pw.Container(
-                  margin: const pw.EdgeInsets.only(bottom: 15),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('Contenedor: $contenedor', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-                      pw.SizedBox(height: 5),
-                      if (gastos.isEmpty)
-                        pw.Text('  * no se capturo gastos', style: pw.TextStyle(fontSize: 12, fontStyle: pw.FontStyle.italic, color: PdfColors.grey))
-                      else
-                        pw.Column(
-                          children: gastos.map((g) {
-                            return pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 10),
-                              child: pw.Row(
-                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                                children: [
-                                  pw.Text(g["concepto"], style: const pw.TextStyle(fontSize: 12)),
-                                  pw.Text(_formatCurrency(g["monto"]), style: const pw.TextStyle(fontSize: 12)),
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      pw.Divider(thickness: 0.5),
-                    ],
-                  ),
-                );
-              }),
-              pw.SizedBox(height: 20),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Total General:', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-                  pw.Text(_formatCurrency(totalGeneral), style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.orange800)),
-                ],
-              ),
-            ];
-          },
-        ),
-      );
-
-
-      final output = await getTemporaryDirectory();
-      final file = File("${output.path}/reporte_viaticos_${DateTime.now().millisecondsSinceEpoch}.pdf");
-      await file.writeAsBytes(await pdf.save());
-
+      final response = await ApiService.get(ApiEndpoints.reporteViaticosPdf);
 
       if (mounted) Navigator.pop(context);
 
+      if (response.statusCode == 200) {
+        final output = await getTemporaryDirectory();
+        final file = File("${output.path}/reporte_viaticos_${DateTime.now().millisecondsSinceEpoch}.pdf");
+        await file.writeAsBytes(response.bodyBytes);
 
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path)],
-          text: 'Reporte de Viáticos - Sita App',
-        ),
-      );
-
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(file.path)],
+            text: 'Reporte de Viáticos - SGT Logistics',
+          ),
+        );
+      } else {
+        String msg = "Error al obtener reporte PDF";
+        try {
+          final data = jsonDecode(response.body);
+          if (data["message"] != null) msg = data["message"];
+        } catch (_) {}
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg), backgroundColor: Colors.red),
+          );
+        }
+      }
     } catch (e) {
-      //
       if (mounted) Navigator.pop(context);
       debugPrint("Error generating PDF: $e");
       if (mounted) {

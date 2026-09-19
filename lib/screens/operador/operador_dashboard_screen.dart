@@ -19,6 +19,7 @@ import '/config/api_config.dart';
 import '../../utils/file_downloader.dart';
 import '../../services/notification_service.dart';
 import '../../services/operador_sync_service.dart';
+import '../../services/update_checker.dart';
 
 class OperadorDashboardScreen extends StatefulWidget {
   const OperadorDashboardScreen({super.key});
@@ -44,6 +45,7 @@ class _OperadorDashboardScreenState extends State<OperadorDashboardScreen> {
     _loadOperatorData().then((_) {
       _checkPendingAssignment();
       NotificationService.fetchAndScheduleNotification();
+      UpdateChecker.check(context);
     });
     // Configurar el sondeo automático cada 30 segundos
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) {

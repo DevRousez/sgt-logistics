@@ -424,6 +424,19 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
       return;
     }
 
+    if (_latitude == null || _longitude == null) {
+      await _obtenerCoordenadasGps();
+      if (_latitude == null || _longitude == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Se requieren las coordenadas GPS actuales. Por favor verifica que la ubicación esté activa."),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() {
       _isLoadingApertura = true;
     });
@@ -508,6 +521,29 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
   }
 
   Future<void> _finalizarViaje() async {
+    if (_photos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Debes anexar al menos 1 foto de evidencia para concluir el viaje."),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (_latitude == null || _longitude == null) {
+      await _obtenerCoordenadasGps();
+      if (_latitude == null || _longitude == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Se requieren las coordenadas GPS actuales. Por favor verifica que la ubicación esté activa."),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
     });
