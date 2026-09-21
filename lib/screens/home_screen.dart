@@ -7,6 +7,7 @@ import '../config/api_config.dart';
 import '/api/api_service.dart';
 import '/endpoints/api_endpoints.dart';
 import '../services/notification_service.dart';
+import '../services/update_checker.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -383,14 +384,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     ),
 
-                                    const Spacer(),
-                                    const Text(
-                                      'Versión 1.0',
-                                      style: TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 12,
-                                      ),
-                                    ),
+                                     const Spacer(),
+                                     Text(
+                                       'Versión ${UpdateChecker.currentVersion}',
+                                       style: const TextStyle(
+                                         color: Colors.white54,
+                                         fontSize: 12,
+                                       ),
+                                     ),
                                   ],
                                 ),
                               ),
