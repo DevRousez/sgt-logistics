@@ -32,4 +32,9 @@ class ApiEndpoints {
   static String get reporteViaticosPdf => "${ApiConfig.baseUrl}/operador/reporte-viaticos-pdf";
   static String get appVersionCheck => "${ApiConfig.baseUrl}/app/version-check";
   static String get appLogs => "${ApiConfig.baseUrl}/app-logs";
+
+  // Módulo Cliente
+  static String get clienteOperaciones => "${ApiConfig.baseUrl}/dashboard/cliente-operaciones";
+  static String get clienteInfoViaje => "${ApiConfig.baseUrl}/dashboard/cliente-info-viaje";
+  static String get clienteEvidenciasDocumentos => "${ApiConfig.baseUrl}/dashboard/cliente-evidencias-documentos";
 }

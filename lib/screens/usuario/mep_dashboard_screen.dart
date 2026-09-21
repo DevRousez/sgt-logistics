@@ -13,7 +13,7 @@ class MepDashboardScreen extends StatefulWidget {
 
 class _MepDashboardScreenState extends State<MepDashboardScreen> {
   String? _userName;
-  String _empresaNombre = "Mi Empresa (MEP)";
+  String _empresaNombre = "Externo Proveedores";
 
   @override
   void initState() {

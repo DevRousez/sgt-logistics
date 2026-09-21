@@ -30,6 +30,7 @@ class _UsuarioDashboardScreenState extends State<UsuarioDashboardScreen> {
       final user = data["user"] ?? data;
       final List<dynamic> permissions = user["permissions"] ?? [];
       final List<dynamic> roles = user["roles"] ?? [];
+      final int idCliente = int.tryParse(user["id_cliente"]?.toString() ?? "0") ?? 0;
 
       if (permissions.contains("documentos-empresas-24h") || roles.contains("documentos-empresas-24h")) {
         _userType = "DOCUMENTOS_EMPRESAS";
@@ -42,7 +43,9 @@ class _UsuarioDashboardScreenState extends State<UsuarioDashboardScreen> {
         _userType = "SGT";
       } else if (permissions.contains("MEP-movil") || roles.contains("MEP-movil")) {
         _userType = "MEP";
-      } else if (permissions.contains("MEC-movil") || roles.contains("MEC-movil")) {
+      } else if ((permissions.contains("MEC-movil") ||
+                 roles.contains("MEC-movil") )&&
+                 idCliente != 0) {
         _userType = "MEC";
       } else {
         _userType = null;
