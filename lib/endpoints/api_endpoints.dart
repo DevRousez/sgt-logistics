@@ -30,4 +30,9 @@ class ApiEndpoints {
   static String get eliminarGastoViaje => "${ApiConfig.baseUrl}/operador/eliminar-gasto-viaje";
   static String get notificationConfig => "${ApiConfig.baseUrl}/operador/notification-config";
   static String get appLogs => "${ApiConfig.baseUrl}/app-logs";
+
+  // Módulo Cliente
+  static String get clienteOperaciones => "${ApiConfig.baseUrl}/dashboard/cliente-operaciones";
+  static String get clienteInfoViaje => "${ApiConfig.baseUrl}/dashboard/cliente-info-viaje";
+  static String get clienteEvidenciasDocumentos => "${ApiConfig.baseUrl}/dashboard/cliente-evidencias-documentos";
 }

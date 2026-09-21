@@ -72,6 +72,8 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
   bool _canFinalize = false;
   bool _canAnular = false;
   bool _isSuperUser = false;
+  bool _isClientUser = false;
+  String _clientUserName = "";
 
   @override
   void initState() {
@@ -100,14 +102,31 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     if (userRaw != null) {
       try {
         final Map<String, dynamic> data = jsonDecode(userRaw);
-        if (data["user"] != null) {
-          final Map<String, dynamic> user = data["user"];
-          final List<dynamic> permsList = user["permissions"] ?? [];
+        final Map<String, dynamic> user = data["user"] ?? data;
+        final List<dynamic> permsList = user["permissions"] ?? [];
+        final dynamic idCliente = user["id_cliente"];
+        final bool isClient = (idCliente != null && idCliente != 0 && idCliente != "0");
+        final String clientName = user["cliente_nombre"] ?? user["name"] ?? "Cliente";
+
+        if (mounted) {
           setState(() {
             _isSuperUser = permsList.contains('superuser');
             _canFinalize = permsList.contains('planeacion-finalizar') || _isSuperUser;
             _canAnular = permsList.contains('planeacion-delete') || _isSuperUser;
+            _isClientUser = isClient;
+            if (isClient) {
+              _selectedClienteId = idCliente.toString();
+              _clientUserName = clientName;
+              if (widget.module == 'monitoreo') {
+                _filtersApplied = true;
+                isLoading = true;
+              }
+            }
           });
+          if (isClient && widget.module == 'monitoreo') {
+            fetchData();
+            _startRefreshTimer();
+          }
         }
       } catch (e) {
         // Fallback
@@ -891,6 +910,36 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                     child: Text(
                       "${row["origen"]} → ${row["destino"]}",
                       style: const TextStyle(fontSize: 13, color: Colors.black54),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.calendar_today, size: 13, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      "Inicio: ${row["fecha_inicio"] ?? row["fecha_programacion"] ?? row["fecha"] ?? "S/N"}  |  Fin: ${row["fecha_fin"] ?? "S/N"}",
+                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.business, size: 13, color: Colors.teal),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      "Empresa: ${row["Empresa"] ?? row["empresa"] ?? "N/A"}  |  Transp: ${row["transportista_nombre"] ?? row["transportista"] ?? row["Empresa"] ?? row["empresa"] ?? "N/A"}",
+                      style: const TextStyle(fontSize: 12, color: Colors.black54),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1744,15 +1793,12 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
         final body = jsonDecode(response.body);
         final dynamic data = body["data"];
         if (data == null) throw Exception("No data");
-        final dynamic docum = data["documentos"];
-        final dynamic cotizacion = data["cotizacion"];
+        final dynamic docum = data["documentos"] ?? {};
+        final dynamic documentsStatus = data["documents"] ?? {};
+        final dynamic cotizacion = data["cotizacion"] ?? {};
         final String? waText = data["wa_text"]?.toString();
-        
-        if (docum == null) {
-          throw Exception("No data");
-        }
 
-        final String cliente = docum["cliente"]?.toString() ?? "S/N";
+        final String cliente = docum["cliente"]?.toString() ?? data["cliente"]?["nombre"]?.toString() ?? "S/N";
         final String origen = cotizacion?["origen"]?.toString() ?? "S/N";
         final String destino = cotizacion?["destino"]?.toString() ?? "S/N";
         final String fechaInicio = docum["fecha_inicio"]?.toString() ?? "S/N";
@@ -1764,7 +1810,7 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
         final String telefono = docum["beneficiario_telefono"]?.toString() ?? "S/N";
         
         final String empresa = docum["Empresa"]?.toString() ?? "S/N";
-        final String transportista = docum["transportista_nombre"]?.toString() ??  docum["Empresa"]?.toString() ?? "S/N";
+        final String transportista = docum["transportista_nombre"]?.toString() ?? docum["Empresa"]?.toString() ?? "S/N";
         
         final String tractoImei = docum["imei_camion"]?.toString() ?? "S/N";
         final String tractoEquipo = docum["id_equipo_camion"]?.toString() ?? "S/N";
@@ -1774,112 +1820,214 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
         final String chasisAEquipo = docum["id_equipo_chasis"]?.toString() ?? "S/N";
         final String chasisAPlacas = "S/N";
 
+        final bool isCima = documentsStatus["cima"] == 1 || documentsStatus["cima"] == "1" || docum["cima"] == 1;
+
+        bool isDocLoaded(dynamic statusVal, dynamic documVal) {
+          if (statusVal != null && statusVal != false && statusVal != 0 && statusVal != "0" && statusVal.toString().trim().isNotEmpty) {
+            return true;
+          }
+          if (documVal != null && documVal != false && documVal != 0 && documVal != "0" && documVal.toString().trim().isNotEmpty) {
+            return true;
+          }
+          return false;
+        }
+
+        final List<Map<String, dynamic>> checkListItems = [
+          {"title": "Formato CCP", "loaded": isDocLoaded(documentsStatus["doc_ccp"], docum["doc_ccp"])},
+          {"title": "Boleta de liberación", "loaded": isDocLoaded(documentsStatus["boleta_liberacion"], docum["boleta_liberacion"])},
+          {"title": "DODA", "loaded": isDocLoaded(documentsStatus["doda"], docum["doda"])},
+          {"title": "Carta Porte PDF", "loaded": isDocLoaded(documentsStatus["carta_porte"], docum["carta_porte"])},
+          {"title": "Carta Porte XML", "loaded": isDocLoaded(documentsStatus["carta_porte_xml"], docum["carta_porte_xml"])},
+          {"title": "Prealta - Boleta vacío", "loaded": isDocLoaded(documentsStatus["boleta_vacio"], docum["boleta_vacio"])},
+          if (!isCima)
+            {"title": "EIR - Comprobante vacío", "loaded": isDocLoaded(documentsStatus["doc_eir"], docum["doc_eir"])}
+          else
+            {"title": "EIR - Comprobante vacío", "cima": true, "loaded": false},
+          {"title": "Evidencia Descarga", "loaded": isDocLoaded(documentsStatus["evidencia_descarga"], docum["evidencia_descarga"])},
+          {"title": "Complemento Pago PDF", "loaded": isDocLoaded(documentsStatus["comprobante_pago_pdf"], docum["comprobante_pago_pdf"])},
+          {"title": "Complemento Pago XML", "loaded": isDocLoaded(documentsStatus["comprobante_pago_xml"], docum["comprobante_pago_xml"])},
+        ];
+
+        final StringBuffer sb = StringBuffer();
+        final String numContenedor = docum["contenedor"]?.toString() ?? docum["num_contenedor"]?.toString() ?? item["contenedor"]?.toString() ?? item["num_contenedor"]?.toString() ?? 'S/N';
+        sb.writeln("🚛 *FICHA DE VIAJE - $numContenedor*");
+        sb.writeln("");
+        sb.writeln("👤 *Cliente:* $cliente");
+        if (contrato != "S/N") sb.writeln("📋 *Contrato:* $contrato");
+        sb.writeln("📍 *Origen:* $origen");
+        sb.writeln("🎯 *Destino:* $destino");
+        sb.writeln("📅 *Inicio:* $fechaInicio");
+        sb.writeln("📅 *Fin:* $fechaFin");
+        sb.writeln("");
+        sb.writeln("🏢 *Transportista:* $transportista");
+        sb.writeln("🚚 *Tracto Placas:* $tractoPlacas | ID: $tractoEquipo");
+        if (chasisAEquipo != "S/N") sb.writeln("📦 *Chasis ID:* $chasisAEquipo");
+        sb.writeln("");
+        sb.writeln("📋 *CHECKLIST DE DOCUMENTOS:*");
+        for (var d in checkListItems) {
+          if (d["cima"] == true) {
+            sb.writeln("• EIR: CIMA Activo (Omitido)");
+          } else {
+            final String st = d["loaded"] == true ? "✅ Cargado" : "❌ Pendiente";
+            sb.writeln("• ${d["title"]}: $st");
+          }
+        }
+        final String generalWaText = sb.toString();
+
+        bool isOperadorExpanded = true;
+
         showDialog(
           context: context,
-          builder: (context) => AlertDialog(
-            titlePadding: EdgeInsets.zero,
-            contentPadding: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade700,
-                borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.airport_shuttle, color: Colors.white),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      "Información de Viaje: ${docum["contenedor"] ?? docum["num_contenedor"] ?? 'S/N'}",
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+          builder: (context) => StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                titlePadding: EdgeInsets.zero,
+                contentPadding: const EdgeInsets.all(16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade700,
+                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
                   ),
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: const Icon(Icons.close, color: Colors.white),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.airport_shuttle, color: Colors.white),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "Información de Viaje: $numContenedor",
+                          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: const Icon(Icons.close, color: Colors.white),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        border: Border(left: BorderSide(color: Colors.blue.shade700, width: 5)),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 4)],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text("CLIENTE:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
-                                child: Text(contrato, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade700)),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(cliente, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-                          const Divider(),
-                          const Text("ORIGEN / DESTINO:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
-                          const SizedBox(height: 4),
-                          Text(origen, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)),
-                          const SizedBox(height: 2),
-                          const Icon(Icons.arrow_downward, size: 16, color: Colors.blueGrey),
-                          const SizedBox(height: 2),
-                          Text(destino, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)),
-                          const Divider(),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text("INICIO:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
-                                    const SizedBox(height: 4),
-                                    Text(fechaInicio, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text("FIN:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
-                                    const SizedBox(height: 4),
-                                    Text(fechaFin, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    _buildWebModalSection(
-                      title: "Beneficiario",
-                      icon: Icons.person,
-                      color: Colors.blue,
+                ),
+                content: SizedBox(
+                  width: double.maxFinite,
+                  child: SingleChildScrollView(
+                    child: Column(
                       children: [
-                        _webModalRow("Operador:", operador),
-                        _webModalRow("Contacto:", contacto),
-                        _webModalRow("Teléfono:", telefono),
-                      ],
-                    ),
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            border: Border(left: BorderSide(color: Colors.blue.shade700, width: 5)),
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 4)],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text("CLIENTE:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
+                                    child: Text(contrato, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade700)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(cliente, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                              const Divider(),
+                              const Text("ORIGEN / DESTINO:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
+                              const SizedBox(height: 4),
+                              Text(origen, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)),
+                              const SizedBox(height: 2),
+                              const Icon(Icons.arrow_downward, size: 16, color: Colors.blueGrey),
+                              const SizedBox(height: 2),
+                              Text(destino, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)),
+                              const Divider(),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text("INICIO:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
+                                        const SizedBox(height: 4),
+                                        Text(fechaInicio, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text("FIN:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
+                                        const SizedBox(height: 4),
+                                        Text(fechaFin, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        _buildWebModalSection(
+                          title: "Información del Operador",
+                          icon: Icons.person,
+                          color: Colors.blue,
+                          isExpandable: true,
+                          isExpanded: isOperadorExpanded,
+                          onToggleExpand: () {
+                            setDialogState(() {
+                              isOperadorExpanded = !isOperadorExpanded;
+                            });
+                          },
+                          children: [
+                            _webModalRow("Operador:", operador),
+                            _webModalRow("Contacto:", contacto),
+                            _webModalRow("Teléfono:", telefono),
+                            if (waText != null && waText.trim().isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              const Text("Instrucciones Operador:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey)),
+                              const SizedBox(height: 4),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.grey.shade300),
+                                ),
+                                child: SelectableText(
+                                  waText,
+                                  style: const TextStyle(fontSize: 12, height: 1.4, color: Colors.black87),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  final String textToShare = (waText != null && waText.trim().isNotEmpty)
+                                      ? waText
+                                      : "🚛 *INFORMACIÓN DEL OPERADOR*\n\n• Operador: $operador\n• Contacto: $contacto\n• Teléfono: $telefono";
+                                  _shareTripText(textToShare);
+                                },
+                                icon: const Icon(Icons.share, color: Colors.white, size: 14),
+                                label: const Text("Compartir Operador", style: TextStyle(color: Colors.white, fontSize: 12)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF25D366),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
 
                     _buildWebModalSection(
                       title: "Transportista",
@@ -1907,27 +2055,65 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                         _webModalRow("  Placas:", chasisAPlacas),
                       ],
                     ),
-                    if (waText != null && waText.trim().isNotEmpty)
-                      _buildWebModalSection(
-                        title: "Información para operador",
-                        icon: Icons.chat,
-                        color: Colors.green,
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.grey.shade300),
+
+                    _buildWebModalSection(
+                      title: "Checklist de Documentos",
+                      icon: Icons.fact_check_outlined,
+                      color: Colors.indigo,
+                      children: checkListItems.map((docItem) {
+                        if (docItem["cima"] == true) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3.0),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.info_outline, size: 14, color: Colors.blue),
+                                const SizedBox(width: 8),
+                                Text(
+                                  "EIR: CIMA Activo (Omitido)",
+                                  style: TextStyle(fontSize: 12, color: Colors.blue.shade800, fontStyle: FontStyle.italic),
+                                ),
+                              ],
                             ),
-                            child: SelectableText(
-                              waText,
-                              style: const TextStyle(fontSize: 12, height: 1.4, color: Colors.black87),
-                            ),
+                          );
+                        }
+                        final bool isLoaded = docItem["loaded"] == true;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3.0),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isLoaded ? Icons.check_circle : Icons.cancel,
+                                size: 16,
+                                color: isLoaded ? Colors.green.shade600 : Colors.red.shade400,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  docItem["title"].toString(),
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.black87),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isLoaded ? Colors.green.shade50 : Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: isLoaded ? Colors.green.shade200 : Colors.red.shade200),
+                                ),
+                                child: Text(
+                                  isLoaded ? "Cargado" : "Pendiente",
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: isLoaded ? Colors.green.shade700 : Colors.red.shade700,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        );
+                      }).toList(),
+                    ),
                   ],
                 ),
               ),
@@ -1938,16 +2124,17 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
                 child: const Text("Cerrar", style: TextStyle(color: Colors.white)),
               ),
-              if (waText != null && waText.isNotEmpty)
-                ElevatedButton.icon(
-                  onPressed: () => _shareTripText(waText),
-                  icon: const Icon(Icons.share, color: Colors.white, size: 16),
-                  label: const Text("Compartir WhatsApp", style: TextStyle(color: Colors.white)),
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
-                ),
+              ElevatedButton.icon(
+                onPressed: () => _shareTripText(generalWaText),
+                icon: const Icon(Icons.share, color: Colors.white, size: 16),
+                label: const Text("Compartir WhatsApp", style: TextStyle(color: Colors.white)),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
+              ),
             ],
-          ),
-        );
+          );
+        },
+      ),
+    );
       } else {
         throw Exception("Error");
       }
@@ -2013,7 +2200,15 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     }
   }
 
-  Widget _buildWebModalSection({required String title, required IconData icon, required Color color, required List<Widget> children}) {
+  Widget _buildWebModalSection({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required List<Widget> children,
+    bool isExpandable = false,
+    bool isExpanded = true,
+    VoidCallback? onToggleExpand,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -2025,15 +2220,32 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 18),
-              const SizedBox(width: 8),
-              Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 13)),
-            ],
+          InkWell(
+            onTap: isExpandable ? onToggleExpand : null,
+            borderRadius: BorderRadius.circular(4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: color, size: 18),
+                    const SizedBox(width: 8),
+                    Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 13)),
+                  ],
+                ),
+                if (isExpandable)
+                  Icon(
+                    isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    color: color,
+                    size: 20,
+                  ),
+              ],
+            ),
           ),
-          const Divider(height: 12),
-          ...children,
+          if (!isExpandable || isExpanded) ...[
+            const Divider(height: 12),
+            ...children,
+          ],
         ],
       ),
     );
@@ -2822,49 +3034,21 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                     const SizedBox(height: 4),
                     if (_selectedGpsItem!["id_contenedor"] != null || _selectedGpsItem!["contenedor_id"] != null || (_selectedGpsItem!["id"] != null && _selectedGpsItem!["tipo_item"] == 'contenedor')) ...[
                       const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: SizedBox(
-                              height: 36,
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  final dynamic cId = _selectedGpsItem!["id_contenedor"] ?? _selectedGpsItem!["contenedor_id"] ?? _selectedGpsItem!["id"];
-                                  final Map<String, dynamic> rowCompat = {
-                                    "contenedor_id": cId,
-                                    "estatus": _selectedGpsItem!["estatus"] ?? "Aprobada"
-                                  };
-                                  _showTripDetailsModal(rowCompat);
-                                },
-                                icon: const Icon(Icons.checklist, size: 14),
-                                label: const Text("Checklist & Fin", style: TextStyle(fontSize: 10)),
-                                style: OutlinedButton.styleFrom(
-                                  side: BorderSide(color: Colors.blueGrey.shade800),
-                                  foregroundColor: Colors.blueGrey.shade800,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                              ),
-                            ),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 38,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            _showWebStyleInfoViajeModal(_selectedGpsItem!);
+                          },
+                          icon: const Icon(Icons.assignment, size: 16),
+                          label: const Text("Ficha de Viaje", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade700,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: SizedBox(
-                              height: 36,
-                              child: ElevatedButton.icon(
-                                onPressed: () {
-                                  _showWebStyleInfoViajeModal(_selectedGpsItem!);
-                                },
-                                icon: const Icon(Icons.info, size: 14),
-                                label: const Text("Ficha de Viaje", style: TextStyle(fontSize: 10)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blue.shade700,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   ],
@@ -3125,23 +3309,30 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
                     )
                   : DropdownButtonFormField<String>(
                       value: _selectedClienteId.isEmpty ? null : _selectedClienteId,
-                      decoration: const InputDecoration(
-                        labelText: "Cliente (Opcional)",
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.person),
+                      decoration: InputDecoration(
+                        labelText: _isClientUser ? "Cliente (Asignado)" : "Cliente (Opcional)",
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.person),
                       ),
                       items: [
-                        const DropdownMenuItem(value: "", child: Text("Todos")),
+                        if (!_isClientUser) const DropdownMenuItem(value: "", child: Text("Todos")),
                         ..._clientes.map((cliente) => DropdownMenuItem(
                               value: cliente["id"],
                               child: Text(cliente["nombre"] ?? "Cliente"),
                             )),
+                        if (_isClientUser && !_clientes.any((c) => c["id"] == _selectedClienteId))
+                          DropdownMenuItem(
+                            value: _selectedClienteId,
+                            child: Text(_clientUserName.isNotEmpty ? _clientUserName : "Mi Cliente"),
+                          ),
                       ],
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedClienteId = val ?? "";
-                        });
-                      },
+                      onChanged: _isClientUser
+                          ? null
+                          : (val) {
+                              setState(() {
+                                _selectedClienteId = val ?? "";
+                              });
+                            },
                     ),
               const SizedBox(height: 16),
 
