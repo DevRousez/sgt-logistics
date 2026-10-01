@@ -713,19 +713,48 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
     }
   }
 
-  Color _getStatusColor(dynamic status) {
-    if (status == null) return Colors.grey;
-    final s = status.toString().toLowerCase();
-    if (s.contains('aprob') || s.contains('complet') || s.contains('list') || s.contains('dispon') || s.contains('activ')) {
-      return Colors.green.shade600;
+  String _getTabStatusCategory(dynamic status, [dynamic estPlane]) {
+    if (status == null) return "canceladas";
+    final s = status.toString().trim().toLowerCase();
+
+    if (s == "planeado" || s == "planeada" || s == "planeadas" || s.contains("planea") || (s.contains("aprob") && estPlane == 1)) {
+      return "planeadas";
     }
-    if (s.contains('pendient') || s.contains('plan') || s.contains('proceso') || s.contains('asign')) {
-      return Colors.orange.shade700;
+    if (s == "por asignar" || s == "por_asignar" || s.contains("por asign") || s.contains("por_asign") || (s.contains("asignar") && !s.contains("no asignada"))) {
+      return "por_asignar";
     }
-    if (s.contains('rechaz') || s.contains('reten') || s.contains('deten')) {
-      return Colors.red.shade600;
+    if (s == "viaje solicitado" || s == "pendiente" || s.contains("solicit") || s.contains("pendient") || s.contains("no asignada") || s.contains("cotizada")) {
+      return "pendientes";
     }
-    return Colors.blue.shade600;
+    if (s == "aprobada" || s == "aprobado" || s == "aprobadas" || s.contains("aprob")) {
+      return "aprobadas";
+    }
+    if (s == "finalizado" || s == "finalizada" || s == "finalizadas" || s.contains("finaliz") || s.contains("termin")) {
+      return "finalizadas";
+    }
+    if (s == "cancelada" || s == "cancelado" || s == "canceladas" || s.contains("cancel") || s.contains("rechaz") || s.contains("reten") || s.contains("deten")) {
+      return "canceladas";
+    }
+    return "canceladas";
+  }
+
+  Color _getStatusColor(dynamic status, [dynamic estPlane]) {
+    final cat = _getTabStatusCategory(status, estPlane);
+    switch (cat) {
+      case 'planeadas':
+        return Colors.orange.shade800; // #c2410c
+      case 'pendientes':
+        return Colors.amber.shade700; // #a16207
+      case 'por_asignar':
+        return const Color(0xFF7C3AED); // #6d28d9
+      case 'aprobadas':
+        return Colors.blue.shade700; // #1d4ed8
+      case 'finalizadas':
+        return Colors.green.shade700; // #15803d
+      case 'canceladas':
+      default:
+        return Colors.red.shade700; // #b91c1c
+    }
   }
 
   String _formatMoneda(double value) {
@@ -736,23 +765,34 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
 
   Widget _buildGroupedOperacionesList(List<Map<String, dynamic>> list) {
     final List<Map<String, dynamic>> planeadas = [];
-    final List<Map<String, dynamic>> finalizadas = [];
     final List<Map<String, dynamic>> pendientes = [];
+    final List<Map<String, dynamic>> porAsignar = [];
     final List<Map<String, dynamic>> aprobadas = [];
+    final List<Map<String, dynamic>> finalizadas = [];
     final List<Map<String, dynamic>> canceladas = [];
 
     for (var item in list) {
-      final status = item["estatus"]?.toString().toLowerCase() ?? "";
-      if (status.contains("plan")) {
-        planeadas.add(item);
-      } else if (status.contains("final") || status.contains("termin")) {
-        finalizadas.add(item);
-      } else if (status.contains("pend") || status.contains("espera")) {
-        pendientes.add(item);
-      } else if (status.contains("aprob")) {
-        aprobadas.add(item);
-      } else {
-        canceladas.add(item);
+      final cat = _getTabStatusCategory(item["estatus"], item["est_plane"]);
+      switch (cat) {
+        case "planeadas":
+          planeadas.add(item);
+          break;
+        case "pendientes":
+          pendientes.add(item);
+          break;
+        case "por_asignar":
+          porAsignar.add(item);
+          break;
+        case "aprobadas":
+          aprobadas.add(item);
+          break;
+        case "finalizadas":
+          finalizadas.add(item);
+          break;
+        case "canceladas":
+        default:
+          canceladas.add(item);
+          break;
       }
     }
 
@@ -760,15 +800,17 @@ class _UsuarioModuleScreenState extends State<UsuarioModuleScreen> {
       padding: const EdgeInsets.all(12),
       children: [
         if (planeadas.isNotEmpty)
-          _buildExpansionSection("Planeadas", planeadas, Colors.orange.shade700),
-        if (finalizadas.isNotEmpty)
-          _buildExpansionSection("Finalizadas", finalizadas, Colors.green.shade600),
+          _buildExpansionSection("Planeadas", planeadas, Colors.orange.shade800),
         if (pendientes.isNotEmpty)
-          _buildExpansionSection("En espera (Pendientes)", pendientes, Colors.amber.shade700),
+          _buildExpansionSection("Viajes Solicitados (Pendientes)", pendientes, Colors.amber.shade700),
+        if (porAsignar.isNotEmpty)
+          _buildExpansionSection("Por Asignar", porAsignar, const Color(0xFF7C3AED)),
         if (aprobadas.isNotEmpty)
-          _buildExpansionSection("Aprobadas", aprobadas, Colors.blue.shade600),
+          _buildExpansionSection("Aprobadas", aprobadas, Colors.blue.shade700),
+        if (finalizadas.isNotEmpty)
+          _buildExpansionSection("Finalizadas", finalizadas, Colors.green.shade700),
         if (canceladas.isNotEmpty)
-          _buildExpansionSection("Otras / Canceladas", canceladas, Colors.red.shade600),
+          _buildExpansionSection("Canceladas", canceladas, Colors.red.shade700),
       ],
     );
   }

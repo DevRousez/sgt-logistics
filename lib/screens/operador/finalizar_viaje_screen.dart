@@ -397,9 +397,9 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
   Future<void> _pickGalleryImagesApertura() async {
     try {
       final pickedFiles = await _picker.pickMultiImage(
-        maxWidth: 1280,
-        maxHeight: 720,
-        imageQuality: 70,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
       );
       if (pickedFiles.isNotEmpty && mounted) {
         setState(() {
@@ -504,9 +504,9 @@ class _FinalizarViajeScreenState extends State<FinalizarViajeScreen> {
   Future<void> _pickGalleryImages() async {
     try {
       final pickedFiles = await _picker.pickMultiImage(
-        maxWidth: 1280,
-        maxHeight: 720,
-        imageQuality: 70,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
       );
       if (pickedFiles.isNotEmpty && mounted) {
         setState(() {

@@ -114,29 +114,49 @@ class _MecDashboardScreenState extends State<MecDashboardScreen> {
 
   int get _activeCount => _operaciones.where(_isOpActiveForGps).length;
 
-  // Colores estandarizados de estatus
-  Color _getStatusColor(dynamic status) {
-    if (status == null) return Colors.grey;
-    final s = status.toString().toLowerCase();
-    if (s.contains('aprob') || s.contains('complet') || s.contains('list') || s.contains('dispon') || s.contains('activ')) {
-      return Colors.blue.shade600;
+  // Categorización y Colores estandarizados de estatus (Emparejados con /viajes/mis-viajes de la web)
+  String _getTabStatusCategory(dynamic status, [dynamic estPlane]) {
+    if (status == null) return "canceladas";
+    final s = status.toString().trim().toLowerCase();
+
+    if (s == "planeado" || s == "planeada" || s == "planeadas" || s.contains("planea") || (s.contains("aprob") && estPlane == 1)) {
+      return "planeadas";
     }
-    if (s.contains('plan')) {
-      return Colors.orange.shade700;
+    if (s == "por asignar" || s == "por_asignar" || s.contains("por asign") || s.contains("por_asign") || (s.contains("asignar") && !s.contains("no asignada"))) {
+      return "por_asignar";
     }
-    if (s.contains('pendient') || s.contains('solicit') || s.contains('espera')) {
-      return Colors.amber.shade700;
+    if (s == "viaje solicitado" || s == "pendiente" || s.contains("solicit") || s.contains("pendient") || s.contains("no asignada") || s.contains("cotizada")) {
+      return "pendientes";
     }
-    if (s.contains('transito') || s.contains('tránsito') || s.contains('ruta') || s.contains('proceso')) {
-      return Colors.teal.shade700;
+    if (s == "aprobada" || s == "aprobado" || s == "aprobadas" || s.contains("aprob")) {
+      return "aprobadas";
     }
-    if (s.contains('finaliz') || s.contains('termin')) {
-      return Colors.green.shade600;
+    if (s == "finalizado" || s == "finalizada" || s == "finalizadas" || s.contains("finaliz") || s.contains("termin")) {
+      return "finalizadas";
     }
-    if (s.contains('rechaz') || s.contains('reten') || s.contains('deten') || s.contains('cancel')) {
-      return Colors.red.shade600;
+    if (s == "cancelada" || s == "cancelado" || s == "canceladas" || s.contains("cancel") || s.contains("rechaz") || s.contains("reten") || s.contains("deten")) {
+      return "canceladas";
     }
-    return Colors.blue.shade600;
+    return "canceladas";
+  }
+
+  Color _getStatusColor(dynamic status, [dynamic estPlane]) {
+    final cat = _getTabStatusCategory(status, estPlane);
+    switch (cat) {
+      case 'planeadas':
+        return Colors.orange.shade800; // #c2410c (Planeadas)
+      case 'pendientes':
+        return Colors.amber.shade700; // #a16207 (Viajes Solicitados)
+      case 'por_asignar':
+        return const Color(0xFF7C3AED); // #6d28d9 (Por Asignar)
+      case 'aprobadas':
+        return Colors.blue.shade700; // #1d4ed8 (Aprobadas)
+      case 'finalizadas':
+        return Colors.green.shade700; // #15803d (Finalizadas)
+      case 'canceladas':
+      default:
+        return Colors.red.shade700; // #b91c1c (Canceladas)
+    }
   }
 
   // Modal para Info de Viaje (FCCP dinámico)
@@ -875,6 +895,7 @@ class MecMisViajesScreen extends StatefulWidget {
 class _MecMisViajesScreenState extends State<MecMisViajesScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
+  String _selectedStatusFilter = "todos";
   List<Map<String, dynamic>> _filteredOperaciones = [];
 
   @override
@@ -893,6 +914,31 @@ class _MecMisViajesScreenState extends State<MecMisViajesScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  String _getTabStatusCategory(dynamic status, [dynamic estPlane]) {
+    if (status == null) return "canceladas";
+    final s = status.toString().trim().toLowerCase();
+
+    if (s == "planeado" || s == "planeada" || s == "planeadas" || s.contains("planea") || (s.contains("aprob") && estPlane == 1)) {
+      return "planeadas";
+    }
+    if (s == "por asignar" || s == "por_asignar" || s.contains("por asign") || s.contains("por_asign") || (s.contains("asignar") && !s.contains("no asignada"))) {
+      return "por_asignar";
+    }
+    if (s == "viaje solicitado" || s == "pendiente" || s.contains("solicit") || s.contains("pendient") || s.contains("no asignada") || s.contains("cotizada")) {
+      return "pendientes";
+    }
+    if (s == "aprobada" || s == "aprobado" || s == "aprobadas" || s.contains("aprob")) {
+      return "aprobadas";
+    }
+    if (s == "finalizado" || s == "finalizada" || s == "finalizadas" || s.contains("finaliz") || s.contains("termin")) {
+      return "finalizadas";
+    }
+    if (s == "cancelada" || s == "cancelado" || s == "canceladas" || s.contains("cancel") || s.contains("rechaz") || s.contains("reten") || s.contains("deten")) {
+      return "canceladas";
+    }
+    return "canceladas";
   }
 
   void _applyFilters() {
@@ -914,6 +960,108 @@ class _MecMisViajesScreenState extends State<MecMisViajesScreen> {
     setState(() {
       _filteredOperaciones = list;
     });
+  }
+
+  Widget _buildStatusFilterTabs() {
+    final Map<String, int> counts = {
+      "todos": _filteredOperaciones.length,
+      "planeadas": 0,
+      "pendientes": 0,
+      "por_asignar": 0,
+      "aprobadas": 0,
+      "finalizadas": 0,
+      "canceladas": 0,
+    };
+
+    for (var op in _filteredOperaciones) {
+      final cat = _getTabStatusCategory(op["estatus"], op["est_plane"]);
+      counts[cat] = (counts[cat] ?? 0) + 1;
+    }
+
+    final List<Map<String, dynamic>> tabs = [
+      {"key": "todos", "label": "Todos", "color": const Color(0xFF0F2027)},
+      {"key": "planeadas", "label": "Planeadas", "color": Colors.orange.shade800},
+      {"key": "pendientes", "label": "Viajes Solicitados", "color": Colors.amber.shade700},
+      {"key": "por_asignar", "label": "Por Asignar", "color": const Color(0xFF7C3AED)},
+      {"key": "aprobadas", "label": "Aprobadas", "color": Colors.blue.shade700},
+      {"key": "finalizadas", "label": "Finalizadas", "color": Colors.green.shade700},
+      {"key": "canceladas", "label": "Canceladas", "color": Colors.red.shade700},
+    ];
+
+    return Container(
+      height: 40,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: tabs.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final tab = tabs[index];
+          final String key = tab["key"];
+          final String label = tab["label"];
+          final Color color = tab["color"];
+          final int count = counts[key] ?? 0;
+          final bool isSelected = _selectedStatusFilter == key;
+
+          return InkWell(
+            onTap: () {
+              setState(() {
+                _selectedStatusFilter = key;
+              });
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected ? color : color.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected ? color : color.withValues(alpha: 0.3),
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : color,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isSelected ? Colors.white.withValues(alpha: 0.25) : color.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      "$count",
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  bool get _hasVisibleItems {
+    if (_filteredOperaciones.isEmpty) return false;
+    if (_selectedStatusFilter == "todos") return true;
+    return _filteredOperaciones.any((op) => _getTabStatusCategory(op["estatus"], op["est_plane"]) == _selectedStatusFilter);
   }
 
   @override
@@ -979,9 +1127,12 @@ class _MecMisViajesScreenState extends State<MecMisViajesScreen> {
             ),
           ),
 
+          // Barra de filtros por estatus
+          _buildStatusFilterTabs(),
+
           // Lista agrupada por estatus
           Expanded(
-            child: _filteredOperaciones.isEmpty
+            child: !_hasVisibleItems
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -989,7 +1140,7 @@ class _MecMisViajesScreenState extends State<MecMisViajesScreen> {
                         Icon(Icons.inbox, size: 64, color: Colors.grey.shade400),
                         const SizedBox(height: 12),
                         Text(
-                          "No se encontraron viajes",
+                          _selectedStatusFilter == "todos" ? "No se encontraron viajes" : "No hay viajes en este estatus",
                           style: TextStyle(fontSize: 16, color: Colors.grey.shade600, fontWeight: FontWeight.bold),
                         ),
                       ],
@@ -1011,45 +1162,53 @@ class _MecMisViajesScreenState extends State<MecMisViajesScreen> {
   Widget _buildGroupedOperacionesList(List<Map<String, dynamic>> list) {
     final List<Map<String, dynamic>> planeadas = [];
     final List<Map<String, dynamic>> pendientes = [];
+    final List<Map<String, dynamic>> porAsignar = [];
     final List<Map<String, dynamic>> aprobadas = [];
-    final List<Map<String, dynamic>> enTransito = [];
     final List<Map<String, dynamic>> finalizadas = [];
-    final List<Map<String, dynamic>> otras = [];
+    final List<Map<String, dynamic>> canceladas = [];
 
     for (var item in list) {
-      final status = (item["estatus"] ?? "").toString().toLowerCase();
-      final estPlane = item["est_plane"];
-
-      if (status.contains("planeada") || (status.contains("aprobada") && estPlane == 1)) {
-        planeadas.add(item);
-      } else if (status.contains("pendiente") || status.contains("cotizada") || status.contains("solicit")) {
-        pendientes.add(item);
-      } else if (status.contains("aprob")) {
-        aprobadas.add(item);
-      } else if (status.contains("tránsito") || status.contains("transito") || status.contains("ruta") || status.contains("proceso") || status.contains("activo")) {
-        enTransito.add(item);
-      } else if (status.contains("finaliz") || status.contains("termin")) {
-        finalizadas.add(item);
-      } else {
-        otras.add(item);
+      final cat = _getTabStatusCategory(item["estatus"], item["est_plane"]);
+      switch (cat) {
+        case "planeadas":
+          planeadas.add(item);
+          break;
+        case "pendientes":
+          pendientes.add(item);
+          break;
+        case "por_asignar":
+          porAsignar.add(item);
+          break;
+        case "aprobadas":
+          aprobadas.add(item);
+          break;
+        case "finalizadas":
+          finalizadas.add(item);
+          break;
+        case "canceladas":
+        default:
+          canceladas.add(item);
+          break;
       }
     }
+
+    final showAll = _selectedStatusFilter == "todos";
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       children: [
-        if (planeadas.isNotEmpty)
-          _buildExpansionSection("Planeadas", planeadas, Colors.orange.shade700),
-        if (pendientes.isNotEmpty)
+        if ((showAll || _selectedStatusFilter == "planeadas") && planeadas.isNotEmpty)
+          _buildExpansionSection("Planeadas", planeadas, Colors.orange.shade800),
+        if ((showAll || _selectedStatusFilter == "pendientes") && pendientes.isNotEmpty)
           _buildExpansionSection("Viajes Solicitados (Pendientes)", pendientes, Colors.amber.shade700),
-        if (aprobadas.isNotEmpty)
-          _buildExpansionSection("Aprobadas", aprobadas, Colors.blue.shade600),
-        if (enTransito.isNotEmpty)
-          _buildExpansionSection("En Tránsito", enTransito, Colors.teal.shade700),
-        if (finalizadas.isNotEmpty)
-          _buildExpansionSection("Finalizadas", finalizadas, Colors.green.shade600),
-        if (otras.isNotEmpty)
-          _buildExpansionSection("Otras / Canceladas", otras, Colors.red.shade600),
+        if ((showAll || _selectedStatusFilter == "por_asignar") && porAsignar.isNotEmpty)
+          _buildExpansionSection("Por Asignar", porAsignar, const Color(0xFF7C3AED)),
+        if ((showAll || _selectedStatusFilter == "aprobadas") && aprobadas.isNotEmpty)
+          _buildExpansionSection("Aprobadas", aprobadas, Colors.blue.shade700),
+        if ((showAll || _selectedStatusFilter == "finalizadas") && finalizadas.isNotEmpty)
+          _buildExpansionSection("Finalizadas", finalizadas, Colors.green.shade700),
+        if ((showAll || _selectedStatusFilter == "canceladas") && canceladas.isNotEmpty)
+          _buildExpansionSection("Canceladas", canceladas, Colors.red.shade700),
       ],
     );
   }

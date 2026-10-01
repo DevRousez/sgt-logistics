@@ -269,9 +269,9 @@ class _CargaContenedorScreenState extends State<CargaContenedorScreen> {
 
     try {
       final pickedFiles = await _picker.pickMultiImage(
-        maxWidth: 1280,
-        maxHeight: 720,
-        imageQuality: 70,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
       );
       if (pickedFiles.isNotEmpty) {
         setState(() {

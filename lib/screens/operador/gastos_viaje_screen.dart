@@ -172,9 +172,9 @@ class _GastosViajeScreenState extends State<GastosViajeScreen> {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 1280,
-        maxHeight: 720,
-        imageQuality: 70,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
       );
       if (pickedFile != null) {
         setState(() {
